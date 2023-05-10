@@ -28,9 +28,18 @@ pub const PermutationType = struct {
         }
 
         /// create a copy of this permutation, using the same allocator
-        /// do not forget to call deinit() on result
         pub fn copy(a: Permutation) !Permutation {
             return Permutation{ .p = try ArrayList.clone(a.p) };
+        }
+
+        /// create inverse permuatation, using the same allocator
+        pub fn inv(a: Permutation) !Permutation {
+            var res = Permutation{ .p = try ArrayList.initCapacity(a.p.allocator, a.size()) };
+            res.p.items.len = a.size();
+            for (a.p.items, 0..) |a_, i| {
+                res.p.items[a_] = i;
+            }
+            return res;
         }
 
         /// returns target at index
@@ -59,17 +68,6 @@ pub const PermutationType = struct {
                 a.p.items[i] = b.at(a_);
             }
             return a;
-        }
-
-        /// returns inverse permuatation
-        /// do not forget to call deinit() on result
-        pub fn inv(a: Permutation) !Permutation {
-            var res = Permutation{ .p = try ArrayList.initCapacity(a.p.allocator, a.size()) };
-            res.p.items.len = a.size();
-            for (a.p.items, 0..) |a_, i| {
-                res.p.items[a_] = i;
-            }
-            return res;
         }
     };
 };
