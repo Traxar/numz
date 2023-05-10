@@ -1,4 +1,4 @@
-pub const Vector = @import("struct/vector.zig").Vector;
+pub const Vector = @import("struct/vector.zig").VectorType;
 pub const Permutation = @import("struct/permutation.zig").Permutation;
 
 test "structures" {
