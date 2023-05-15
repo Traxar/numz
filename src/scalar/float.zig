@@ -4,7 +4,6 @@ const Relation = @import("relation.zig").Relation;
 
 /// wrapper for the float datastructure
 /// choose float from {f16,f32,f64,f80,f128}
-/// TODO: f128 is broken due to https://github.com/ziglang/zig/issues/15611
 pub fn Float(comptime float: type) type {
     return struct {
         const Scalar = @This();
@@ -107,7 +106,7 @@ test "operators" {
 }
 
 test "comparisons" {
-    const fTypes = [_]type{ f16, f32, f64, f80 }; //, f128 }; // TODO: uncomment when https://github.com/ziglang/zig/issues/15611 gets fixed
+    const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
         const a = F.from(-3.14);

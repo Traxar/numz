@@ -1,83 +1,120 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const testing = std.testing;
 
-/// return struct that can create Vectors
+/// return struct that can allocate and free vectors
+/// operations by this struct result in a newly allocated vector
+/// operation by the vector struct are inplace
 pub fn VectorType(comptime Scalar: type) type {
     return struct {
         const Self = @This();
         const ArrayList = std.ArrayList(Scalar);
         allocator: std.mem.Allocator,
 
-        /// create a vector with n elements with value a
-        /// do not forget to call deinit() on result
+        fn init(self: Self, n: usize) !Vector {
+            return Vector{ .val = (try self.allocator.alloc(Scalar, n)) };
+        }
+
+        /// deinitialize Vector
+        pub fn deinit(self: Self, a: Vector) void {
+            self.allocator.free(a.val);
+        }
+
+        /// allocates a vector with n elements with value a
         pub fn rep(self: Self, a: Scalar, n: usize) !Vector {
-            var res = Vector{ .v = try ArrayList.initCapacity(self.allocator, n) };
-            res.v.appendNTimesAssumeCapacity(a, n);
+            var res = try self.init(n);
+            for (0..n) |i| {
+                res.set(i, a);
+            }
             return res;
         }
 
+        /// allocates a copy of vector a
+        pub fn copy(self: Self, a: Vector) !Vector {
+            return Vector{ .val = (try self.allocator.dupe(Scalar, a.val)) };
+        }
+
         /// vector with runtime length
+        /// all functions in this struct are inplace and do not require memory allocation
         const Vector = struct {
-            v: ArrayList,
-
-            /// deinitialize Vector
-            pub fn deinit(a: Vector) void {
-                a.v.deinit();
-            }
-
-            /// create a copy of this vector, using the same allocator
-            /// do not forget to call deinit() on result
-            pub fn copy(a: Vector) !Vector {
-                return Vector{ .v = try ArrayList.clone(a.v) };
-            }
+            val: []Scalar,
 
             /// return length of vector
             pub fn len(a: Vector) usize {
-                return a.v.items.len;
+                return a.val.len;
             }
 
             /// return element at index i
             pub fn at(a: Vector, i: usize) Scalar {
-                return a.v.items[i];
+                assert(i < a.len());
+                return a.val[i];
             }
 
             /// set element at index i to b
             pub fn set(a: Vector, i: usize, b: Scalar) void {
-                a.v.items[i] = b;
+                assert(i < a.len());
+                a.val[i] = b;
             }
 
-            /// add b to a
+            /// a <- a + b
             /// return a
             pub fn add(a: Vector, b: Vector) Vector {
-                for (a.v.items, b.v.items, 0..) |a_, b_, i| {
-                    a.set(i, a_.add(b_));
+                assert(a.len() == b.len());
+                for (0..a.len()) |i| {
+                    a.set(i, a.at(i).add(b.at(i)));
                 }
                 return a;
             }
 
-            /// subtract b from a
+            /// a <- a - b
             /// return a
             pub fn sub(a: Vector, b: Vector) Vector {
-                for (a.v.items, b.v.items, 0..) |a_, b_, i| {
-                    a.set(i, a_.sub(b_));
+                assert(a.len() == b.len());
+                for (0..a.len()) |i| {
+                    a.set(i, a.at(i).sub(b.at(i)));
                 }
                 return a;
             }
 
-            /// elemtentwise multiply b onto a
+            /// a <- b - a
+            /// return a
+            pub fn sub_(a: Vector, b: Vector) Vector { //TODO: change name
+                assert(a.len() == b.len());
+                for (0..a.len()) |i| {
+                    a.set(i, b.at(i).sub(a.at(i)));
+                }
+                return a;
+            }
+
+            /// a <- a * b
+            /// elemtentwise
             /// return a
             pub fn mul(a: Vector, b: Vector) Vector {
-                for (a.v.items, b.v.items, 0..) |a_, b_, i| {
-                    a.set(i, a_.mul(b_));
+                assert(a.len() == b.len());
+                for (0..a.len()) |i| {
+                    a.set(i, a.at(i).mul(b.at(i)));
                 }
                 return a;
             }
 
-            /// elementwise divide a by b
+            /// a <- a / b
+            /// elementwise
             /// return a
             pub fn div(a: Vector, b: Vector) Vector {
-                for (a.v.items, b.v.items, 0..) |a_, b_, i| {
-                    a.set(i, a_.div(b_));
+                assert(a.len() == b.len());
+                for (0..a.len()) |i| {
+                    a.set(i, a.at(i).div(b.at(i)));
+                }
+                return a;
+            }
+
+            /// a <- b / a
+            /// elementwise
+            /// return a
+            pub fn div_(a: Vector, b: Vector) Vector { //TODO: change name
+                assert(a.len() == b.len());
+                for (0..a.len()) |i| {
+                    a.set(i, b.at(i).div(a.at(i)));
                 }
                 return a;
             }
@@ -85,17 +122,17 @@ pub fn VectorType(comptime Scalar: type) type {
             /// return sum of elements
             pub fn sum(a: Vector) Scalar {
                 var res = Scalar.zero;
-                for (a.v.items) |a_| {
-                    res = res.add(a_);
+                for (0..a.len()) |i| {
+                    res = res.add(a.at(i));
                 }
                 return res;
             }
 
-            ///return elementwise a / b
+            ///return the scalar product of a and b
             pub fn dot(a: Vector, b: Vector) Scalar {
                 var res = Scalar.zero;
-                for (a.v.items, b.v.items) |a_, b_| {
-                    res = res.add(a_.mul(b_));
+                for (0..a.len()) |i| {
+                    res = res.add(a.at(i).mul(b.at(i)));
                 }
                 return res;
             }
@@ -122,16 +159,6 @@ pub fn VectorType(comptime Scalar: type) type {
                 }
                 return res;
             }
-
-            /// append b to a
-            pub fn append(a: *Vector, b: Scalar) !void {
-                try a.v.append(b);
-            }
-
-            /// concat b onto a
-            pub fn concat(a: *Vector, b: Vector) !void {
-                try a.v.appendSlice(b.v.items);
-            }
         };
     };
 }
@@ -151,7 +178,7 @@ test "creation" {
 
     const a = F.from(-3.14);
     var v = try V.rep(a, n);
-    defer v.deinit();
+    defer V.deinit(v);
 
     try testing.expectEqual(@as(usize, n), v.len());
     for (0..n) |i| {
@@ -175,34 +202,34 @@ test "operators" {
     const a_ = F.from(-3.14);
     const b_ = F.from(5.27);
     var a = try V.rep(a_, n);
-    defer a.deinit();
+    defer V.deinit(a);
     a.set(1, F.zero);
     var b = try V.rep(b_, n);
-    defer b.deinit();
+    defer V.deinit(b);
     b.set(0, F.eye);
 
     try testing.expect(a.at(1).cmp(.equal, F.zero));
 
-    const c = (try a.copy()).add(b);
-    defer c.deinit();
+    const c = (try V.copy(a)).add(b);
+    defer V.deinit(c);
     try testing.expect(c.at(0).cmp(.equal, a_.add(F.eye)));
     try testing.expect(c.at(1).cmp(.equal, b_));
     try testing.expect(c.at(2).cmp(.equal, a_.add(b_)));
 
-    const d = (try a.copy()).add(b);
-    defer d.deinit();
+    const d = (try V.copy(a)).add(b);
+    defer V.deinit(d);
     try testing.expect(d.at(0).cmp(.equal, a_.add(F.eye)));
     try testing.expect(d.at(1).cmp(.equal, b_));
     try testing.expect(d.at(2).cmp(.equal, a_.add(b_)));
 
-    const e = (try a.copy()).mul(b);
-    defer e.deinit();
+    const e = (try V.copy(a)).mul(b);
+    defer V.deinit(e);
     try testing.expect(e.at(0).cmp(.equal, a_));
     try testing.expect(e.at(1).cmp(.equal, F.zero));
     try testing.expect(e.at(2).cmp(.equal, a_.mul(b_)));
 
-    const f = (try a.copy()).div(b);
-    defer f.deinit();
+    const f = (try V.copy(a)).div(b);
+    defer V.deinit(f);
     try testing.expect(f.at(0).cmp(.equal, a_));
     try testing.expect(f.at(1).cmp(.equal, F.zero));
     try testing.expect(f.at(2).cmp(.equal, a_.div(b_)));
@@ -216,10 +243,4 @@ test "operators" {
 
     try testing.expect(a.min().cmp(.equal, a_.min(F.zero)));
     try testing.expect(b.max().cmp(.equal, b_.max(F.eye)));
-
-    try a.append(F.eye);
-    try testing.expect(a.at(3).cmp(.equal, F.eye));
-
-    try a.concat(b);
-    try testing.expect(a.at(6).cmp(.equal, b_));
 }
