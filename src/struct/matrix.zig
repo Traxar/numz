@@ -8,12 +8,12 @@ const testing = std.testing;
 pub fn MatrixType(comptime Scalar: type) type {
     return struct {
         const Self = @This();
-        const MultiArrayList = std.MultiArrayList(struct { col: usize, val: Scalar });
         allocator: std.mem.Allocator,
 
         fn init(self: Self, rows: usize, cols: usize) !Matrix {
             return Matrix{
-                .rows = try self.allocator.alloc(MultiArrayList, rows),
+                .val = (try self.allocator.alloc(Matrix.Row, rows)).ptr,
+                .rows = rows,
                 .cols = cols,
                 .allocator = self.allocator,
             };
@@ -21,18 +21,18 @@ pub fn MatrixType(comptime Scalar: type) type {
 
         /// deinitialize matrix
         pub fn deinit(self: Self, a: Matrix) void {
-            for (0..a.rows.len) |i| {
-                a.rows[i].deinit(self.allocator);
+            for (0..a.rows) |i| {
+                a.val[i].deinit(self.allocator);
             }
-            self.allocator.free(a.rows);
+            self.allocator.free(a.val[0..a.rows]);
         }
 
         /// create an empty matrix with n rows and m columns
         /// do not forget to call deinit() on result
         pub fn zero(self: Self, rows: usize, cols: usize) !Matrix {
             var res = try self.init(rows, cols);
-            for (0..rows) |i| {
-                res.rows[i] = MultiArrayList{};
+            for (0..res.rows) |i| {
+                res.val[i] = Matrix.Row{};
             }
             return res;
         }
@@ -41,7 +41,7 @@ pub fn MatrixType(comptime Scalar: type) type {
         /// do not forget to call deinit() on result
         pub fn eye(self: Self, size: usize) !Matrix {
             var res = try self.zero(size, size);
-            for (0..size) |i| {
+            for (0..res.rows) |i| {
                 try res.set(i, i, Scalar.eye);
             }
             return res;
@@ -49,9 +49,9 @@ pub fn MatrixType(comptime Scalar: type) type {
 
         /// allocates a copy of matrix a
         pub fn copy(self: Self, a: Matrix) !Matrix {
-            var res = try self.init(a.rows.len, a.cols);
-            for (0..a.rows.len) |i| {
-                res.rows[i] = a.rows[i].clone(self.allocator);
+            var res = try self.init(a.rows, a.cols);
+            for (0..a.rows) |i| {
+                res.val[i] = a.val[i].clone(self.allocator);
             }
             return res;
         }
@@ -60,7 +60,9 @@ pub fn MatrixType(comptime Scalar: type) type {
         /// all functions in this struct are inplace
         /// they might require memory allocation since this is a sparse datastructure
         const Matrix = struct {
-            rows: []MultiArrayList,
+            const Row = std.MultiArrayList(struct { col: usize, val: Scalar });
+            val: [*]Row,
+            rows: usize,
             cols: usize,
             allocator: std.mem.Allocator,
 
@@ -68,7 +70,7 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// performs binary search
             /// O(log(m))
             fn findIndex(a: Matrix, row: usize, col: usize) struct { index: usize, exists: bool } {
-                const r = a.rows[row].items(.col);
+                const r = a.val[row].items(.col);
                 var max = r.len;
                 if (max == 0) {
                     return .{ .index = 0, .exists = false };
@@ -88,11 +90,11 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// return element at row and column
             /// O(log(m))
             pub fn at(a: Matrix, row: usize, col: usize) Scalar {
-                assert(row < a.rows.len);
+                assert(row < a.rows);
                 assert(col < a.cols);
                 const i = a.findIndex(row, col);
                 if (i.exists) {
-                    return a.rows[row].items(.val)[i.index];
+                    return a.val[row].items(.val)[i.index];
                 } else {
                     return Scalar.zero;
                 }
@@ -101,18 +103,18 @@ pub fn MatrixType(comptime Scalar: type) type {
             // set element at row i and column j to b
             // O(m)
             pub fn set(a: Matrix, row: usize, col: usize, b: Scalar) !void {
-                assert(row < a.rows.len);
+                assert(row < a.rows);
                 assert(col < a.cols);
                 const i = a.findIndex(row, col);
                 if (b.cmp(.equal, Scalar.zero)) {
                     if (i.exists) {
-                        a.rows[row].orderedRemove(i.index);
+                        a.val[row].orderedRemove(i.index);
                     } // else do nothing
                 } else {
                     if (i.exists) {
-                        a.rows[row].items(.val)[i.index] = b;
+                        a.val[row].items(.val)[i.index] = b;
                     } else {
-                        try a.rows[row].insert(a.allocator, i.index, .{ .col = col, .val = b });
+                        try a.val[row].insert(a.allocator, i.index, .{ .col = col, .val = b });
                     }
                 }
                 return;
@@ -194,12 +196,12 @@ test "removing entries" {
     try testing.expect(a.at(2, 1).cmp(.equal, F.from(9)));
     try testing.expect(a.at(2, 2).cmp(.equal, F.from(7)));
 
-    try testing.expectEqual(@as(usize, 3), a.rows[0].len);
-    try testing.expectEqual(@as(usize, 2), a.rows[1].len);
+    try testing.expectEqual(@as(usize, 3), a.val[0].len);
+    try testing.expectEqual(@as(usize, 2), a.val[1].len);
 
     try a.set(2, 2, F.from(0));
     try a.set(2, 0, F.from(0));
     try a.set(2, 1, F.from(0));
 
-    try testing.expectEqual(@as(usize, 0), a.rows[2].len);
+    try testing.expectEqual(@as(usize, 0), a.val[2].len);
 }

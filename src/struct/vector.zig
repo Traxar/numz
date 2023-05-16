@@ -8,16 +8,18 @@ const testing = std.testing;
 pub fn VectorType(comptime Scalar: type) type {
     return struct {
         const Self = @This();
-        const ArrayList = std.ArrayList(Scalar);
         allocator: std.mem.Allocator,
 
         fn init(self: Self, n: usize) !Vector {
-            return Vector{ .val = (try self.allocator.alloc(Scalar, n)) };
+            return Vector{
+                .val = (try self.allocator.alloc(Scalar, n)).ptr,
+                .len = n,
+            };
         }
 
         /// deinitialize Vector
         pub fn deinit(self: Self, a: Vector) void {
-            self.allocator.free(a.val);
+            self.allocator.free(a.val[0..a.len]);
         }
 
         /// allocates a vector with n elements with value a
@@ -31,36 +33,35 @@ pub fn VectorType(comptime Scalar: type) type {
 
         /// allocates a copy of vector a
         pub fn copy(self: Self, a: Vector) !Vector {
-            return Vector{ .val = (try self.allocator.dupe(Scalar, a.val)) };
+            return Vector{
+                .val = (try self.allocator.dupe(Scalar, a.val[0..a.len])).ptr,
+                .len = a.len,
+            };
         }
 
         /// vector with runtime length
         /// all functions in this struct are inplace and do not require memory allocation
         const Vector = struct {
-            val: []Scalar,
-
-            /// return length of vector
-            pub fn len(a: Vector) usize {
-                return a.val.len;
-            }
+            val: [*]Scalar,
+            len: usize,
 
             /// return element at index i
             pub fn at(a: Vector, i: usize) Scalar {
-                assert(i < a.len());
+                assert(i < a.len);
                 return a.val[i];
             }
 
             /// set element at index i to b
             pub fn set(a: Vector, i: usize, b: Scalar) void {
-                assert(i < a.len());
+                assert(i < a.len);
                 a.val[i] = b;
             }
 
             /// a <- a + b
             /// return a
             pub fn add(a: Vector, b: Vector) Vector {
-                assert(a.len() == b.len());
-                for (0..a.len()) |i| {
+                assert(a.len == b.len);
+                for (0..a.len) |i| {
                     a.set(i, a.at(i).add(b.at(i)));
                 }
                 return a;
@@ -69,8 +70,8 @@ pub fn VectorType(comptime Scalar: type) type {
             /// a <- a - b
             /// return a
             pub fn sub(a: Vector, b: Vector) Vector {
-                assert(a.len() == b.len());
-                for (0..a.len()) |i| {
+                assert(a.len == b.len);
+                for (0..a.len) |i| {
                     a.set(i, a.at(i).sub(b.at(i)));
                 }
                 return a;
@@ -79,8 +80,8 @@ pub fn VectorType(comptime Scalar: type) type {
             /// a <- b - a
             /// return a
             pub fn sub_(a: Vector, b: Vector) Vector { //TODO: change name
-                assert(a.len() == b.len());
-                for (0..a.len()) |i| {
+                assert(a.len == b.len);
+                for (0..a.len) |i| {
                     a.set(i, b.at(i).sub(a.at(i)));
                 }
                 return a;
@@ -90,8 +91,8 @@ pub fn VectorType(comptime Scalar: type) type {
             /// elemtentwise
             /// return a
             pub fn mul(a: Vector, b: Vector) Vector {
-                assert(a.len() == b.len());
-                for (0..a.len()) |i| {
+                assert(a.len == b.len);
+                for (0..a.len) |i| {
                     a.set(i, a.at(i).mul(b.at(i)));
                 }
                 return a;
@@ -101,8 +102,8 @@ pub fn VectorType(comptime Scalar: type) type {
             /// elementwise
             /// return a
             pub fn div(a: Vector, b: Vector) Vector {
-                assert(a.len() == b.len());
-                for (0..a.len()) |i| {
+                assert(a.len == b.len);
+                for (0..a.len) |i| {
                     a.set(i, a.at(i).div(b.at(i)));
                 }
                 return a;
@@ -112,8 +113,8 @@ pub fn VectorType(comptime Scalar: type) type {
             /// elementwise
             /// return a
             pub fn div_(a: Vector, b: Vector) Vector { //TODO: change name
-                assert(a.len() == b.len());
-                for (0..a.len()) |i| {
+                assert(a.len == b.len);
+                for (0..a.len) |i| {
                     a.set(i, b.at(i).div(a.at(i)));
                 }
                 return a;
@@ -122,7 +123,7 @@ pub fn VectorType(comptime Scalar: type) type {
             /// return sum of elements
             pub fn sum(a: Vector) Scalar {
                 var res = Scalar.zero;
-                for (0..a.len()) |i| {
+                for (0..a.len) |i| {
                     res = res.add(a.at(i));
                 }
                 return res;
@@ -131,7 +132,7 @@ pub fn VectorType(comptime Scalar: type) type {
             ///return the scalar product of a and b
             pub fn dot(a: Vector, b: Vector) Scalar {
                 var res = Scalar.zero;
-                for (0..a.len()) |i| {
+                for (0..a.len) |i| {
                     res = res.add(a.at(i).mul(b.at(i)));
                 }
                 return res;
@@ -145,7 +146,7 @@ pub fn VectorType(comptime Scalar: type) type {
             ///return the smallest element
             pub fn min(a: Vector) Scalar {
                 var res = a.at(0);
-                for (1..a.len()) |i| {
+                for (1..a.len) |i| {
                     res = res.min(a.at(i));
                 }
                 return res;
@@ -154,7 +155,7 @@ pub fn VectorType(comptime Scalar: type) type {
             ///return the largest element
             pub fn max(a: Vector) Scalar {
                 var res = a.at(0);
-                for (1..a.len()) |i| {
+                for (1..a.len) |i| {
                     res = res.max(a.at(i));
                 }
                 return res;
@@ -180,7 +181,7 @@ test "creation" {
     var v = try V.rep(a, n);
     defer V.deinit(v);
 
-    try testing.expectEqual(@as(usize, n), v.len());
+    try testing.expectEqual(@as(usize, n), v.len);
     for (0..n) |i| {
         try testing.expect(a.cmp(.equal, v.at(i)));
     }
