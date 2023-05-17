@@ -14,35 +14,26 @@ const testing = std.testing;
 
 /// return struct that can allocate and free matrices
 /// operations by this struct result in a newly allocated matrix
-/// operation by the matrix struct are inplace
 pub fn MatrixType(comptime Scalar: type) type {
     return struct {
         const Self = @This();
         const VectorType = @import("vector.zig").VectorType(Scalar);
         const Vector = VectorType.Vector;
-        allocator: std.mem.Allocator,
+        allocptr: *const std.mem.Allocator,
 
-        fn init(self: Self, rows: usize, cols: usize) !Matrix {
+        fn init(allocptr: *const std.mem.Allocator, rows: usize, cols: usize) !Matrix {
             return Matrix{
-                .val = (try self.allocator.alloc(Matrix.Row, rows)).ptr,
+                .val = (try allocptr.alloc(Matrix.Row, rows)).ptr,
                 .rows = rows,
                 .cols = cols,
-                .allocator = self.allocator,
+                .allocptr = allocptr,
             };
-        }
-
-        /// deinitialize matrix
-        pub fn deinit(self: Self, a: Matrix) void {
-            for (0..a.rows) |i| {
-                a.val[i].deinit(self.allocator);
-            }
-            self.allocator.free(a.val[0..a.rows]);
         }
 
         /// create an empty matrix with n rows and m columns
         /// do not forget to call deinit() on result
         pub fn zero(self: Self, rows: usize, cols: usize) !Matrix {
-            var res = try self.init(rows, cols);
+            var res = try init(self.allocptr, rows, cols);
             for (0..res.rows) |i| {
                 res.val[i] = Matrix.Row{};
             }
@@ -59,35 +50,38 @@ pub fn MatrixType(comptime Scalar: type) type {
             return res;
         }
 
-        /// allocates a copy of matrix a
-        pub fn copy(self: Self, a: Matrix) !Matrix {
-            var res = try self.init(a.rows, a.cols);
-            for (0..a.rows) |i| {
-                res.val[i] = a.val[i].clone(self.allocator);
-            }
-            return res;
-        }
-
         /// sparse matrix with runtime size
-        /// all functions in this struct are inplace
-        /// they might still require memory allocation since this is a sparse datastructure
         const Matrix = struct {
             const Row = std.MultiArrayList(struct { col: usize, val: Scalar });
             val: [*]Row,
             rows: usize,
             cols: usize,
-            allocator: std.mem.Allocator,
+            allocptr: *const std.mem.Allocator,
+
+            /// deinitialize matrix
+            pub fn deinit(a: Matrix) void {
+                for (0..a.rows) |i| {
+                    a.val[i].deinit(a.allocptr.*);
+                }
+                a.allocptr.free(a.val[0..a.rows]);
+            }
+
+            /// allocates a copy of matrix a
+            pub fn copy(a: Matrix) !Matrix {
+                var res = try init(a.allocptr, a.rows, a.cols);
+                for (0..a.rows) |i| {
+                    res.val[i] = a.val[i].clone(a.allocptr.*);
+                }
+                return res;
+            }
 
             /// return index of col in row
             /// performs binary search
-            /// O(log(m))
-            fn findIndex(a: Matrix, row: usize, col: usize) struct { index: usize, exists: bool } {
+            /// O(log(m)), O(1) if dense
+            fn indAt(a: Matrix, row: usize, col: usize) struct { index: usize, exists: bool } {
                 const r = a.val[row].items(.col);
-                var max = r.len;
-                if (max == 0) {
-                    return .{ .index = 0, .exists = false };
-                }
-                var min: usize = 0;
+                var min = r.len -| (a.cols - col);
+                var max = @min(r.len, col);
                 while (min != max) {
                     const pivot = @divFloor(min + max, 2);
                     if (col <= r[pivot]) {
@@ -99,20 +93,8 @@ pub fn MatrixType(comptime Scalar: type) type {
                 return (.{ .index = min, .exists = (min < r.len and col == r[min]) });
             }
 
-            /// return element at row and column
-            /// O(log(m))
-            pub fn at(a: Matrix, row: usize, col: usize) Scalar {
-                assert(row < a.rows);
-                assert(col < a.cols);
-                const i = a.findIndex(row, col);
-                if (i.exists) {
-                    return a.val[row].items(.val)[i.index];
-                } else {
-                    return Scalar.zero;
-                }
-            }
-
-            fn indAt(a: Matrix, row: usize) usize {
+            /// return number of entries in the row
+            fn entAt(a: Matrix, row: usize) usize {
                 return a.val[row].len;
             }
 
@@ -140,12 +122,25 @@ pub fn MatrixType(comptime Scalar: type) type {
                 a.val[row].items(.val)[colIndex] = b;
             }
 
+            /// return element at row and column
+            /// O(log(m))
+            pub fn at(a: Matrix, row: usize, col: usize) Scalar {
+                assert(row < a.rows);
+                assert(col < a.cols);
+                const i = a.indAt(row, col);
+                if (i.exists) {
+                    return a.val[row].items(.val)[i.index];
+                } else {
+                    return Scalar.zero;
+                }
+            }
+
             // set element at row i and column j to b
             // O(m)
             pub fn set(a: Matrix, row: usize, col: usize, b: Scalar) !void {
                 assert(row < a.rows);
                 assert(col < a.cols);
-                const i = a.findIndex(row, col);
+                const i = a.indAt(row, col);
                 if (b.cmp(.equal, Scalar.zero)) {
                     if (i.exists) {
                         a.val[row].orderedRemove(i.index);
@@ -154,7 +149,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     if (i.exists) {
                         a.setAt(row, i.index, b);
                     } else {
-                        try a.val[row].insert(a.allocator, i.index, .{ .col = col, .val = b });
+                        try a.val[row].insert(a.allocptr.*, i.index, .{ .col = col, .val = b });
                     }
                 }
                 return;
@@ -165,7 +160,7 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// O(n*m)
             pub fn mulS(a: Matrix, b: Scalar) Matrix {
                 for (0..a.rows) |i| {
-                    for (0..a.indAt(i)) |j| {
+                    for (0..a.entAt(i)) |j| {
                         a.setAt(i, j, a.valAt(i, j).mul(b));
                     }
                 }
@@ -176,9 +171,9 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// O(n*m)
             pub fn mulV(a: Matrix, b: Vector) !Vector {
                 assert(a.cols == b.len);
-                var res = try (VectorType{ .allocator = a.allocator }).rep(Scalar.zero, a.rows);
+                var res = try (VectorType{ .allocptr = a.allocptr }).rep(Scalar.zero, a.rows);
                 for (0..a.rows) |i| {
-                    for (0..a.indAt(i)) |j| {
+                    for (0..a.entAt(i)) |j| {
                         res.set(i, res.at(i).add(a.valAt(i, j).mul(b.at(a.colAt(i, j)))));
                     }
                 }
@@ -189,7 +184,7 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// return a
             pub fn divS(a: Matrix, b: Scalar) Matrix {
                 for (0..a.rows) |i| {
-                    for (0..a.indAt(i)) |j| {
+                    for (0..a.entAt(i)) |j| {
                         a.setAt(i, j, a.valAt(i, j).div(b));
                     }
                 }
@@ -209,12 +204,12 @@ test "creation" {
     }
 
     const F = @import("../scalar.zig").Float(f32);
-    const M = MatrixType(F){ .allocator = allocator };
+    const M = MatrixType(F){ .allocptr = &allocator };
 
     const n = 5;
     const m = 8;
     var a = try M.zero(n, m);
-    defer M.deinit(a);
+    defer a.deinit();
     for (0..n) |i| {
         for (0..m) |j| {
             try testing.expect(a.at(i, j).cmp(.equal, F.zero));
@@ -222,7 +217,7 @@ test "creation" {
     }
 
     var b = try M.eye(n);
-    defer M.deinit(b);
+    defer b.deinit();
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
@@ -244,10 +239,10 @@ test "removing entries" {
     }
 
     const F = @import("../scalar.zig").Float(f32);
-    const M = MatrixType(F){ .allocator = allocator };
+    const M = MatrixType(F){ .allocptr = &allocator };
 
     var a = try M.zero(3, 3);
-    defer M.deinit(a);
+    defer a.deinit();
     // 2 1 3
     // 6 0 5
     // 8 9 7
@@ -292,12 +287,12 @@ test "mulpiplication with scalar" {
     }
 
     const F = @import("../scalar.zig").Float(f32);
-    const M = MatrixType(F){ .allocator = allocator };
+    const M = MatrixType(F){ .allocptr = &allocator };
 
     const n = 3;
     const a_ = F.from(-3.14);
     var a = (try M.eye(n)).mulS(a_);
-    defer M.deinit(a);
+    defer a.deinit();
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
@@ -329,23 +324,23 @@ test "mulpiplication with vector" {
     }
 
     const F = @import("../scalar.zig").Float(f32);
-    const V = @import("vector.zig").VectorType(F){ .allocator = allocator };
-    const M = MatrixType(F){ .allocator = allocator };
+    const V = @import("vector.zig").VectorType(F){ .allocptr = &allocator };
+    const M = MatrixType(F){ .allocptr = &allocator };
 
     const n = 3;
     var a = try M.eye(n);
-    defer M.deinit(a);
+    defer a.deinit();
     try a.set(0, 2, F.from(-1));
     try a.set(1, 0, F.from(-1));
     try a.set(2, 1, F.from(-1));
 
     var v = try V.rep(F.zero, n);
-    defer V.deinit(v);
+    defer v.deinit();
     v.set(1, F.from(1));
     v.set(2, F.from(2));
 
     const av = try a.mulV(v);
-    defer V.deinit(av);
+    defer av.deinit();
     try testing.expect(av.at(0).cmp(.equal, F.from(-2)));
     try testing.expect(av.at(1).cmp(.equal, F.from(1)));
     try testing.expect(av.at(2).cmp(.equal, F.from(1)));

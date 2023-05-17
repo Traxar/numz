@@ -3,23 +3,18 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 /// return struct that can allocate and free vectors
-/// operations by this struct result in a newly allocated vector
-/// operation by the vector struct are inplace
+/// operations by this struct create new vectors
 pub fn VectorType(comptime Scalar: type) type {
     return struct {
         const Self = @This();
-        allocator: std.mem.Allocator,
+        allocptr: *const std.mem.Allocator,
 
         fn init(self: Self, n: usize) !Vector {
             return Vector{
-                .val = (try self.allocator.alloc(Scalar, n)).ptr,
+                .val = (try self.allocptr.alloc(Scalar, n)).ptr,
                 .len = n,
+                .allocptr = self.allocptr,
             };
-        }
-
-        /// deinitialize Vector
-        pub fn deinit(self: Self, a: Vector) void {
-            self.allocator.free(a.val[0..a.len]);
         }
 
         /// allocates a vector with n elements with value a
@@ -31,19 +26,25 @@ pub fn VectorType(comptime Scalar: type) type {
             return res;
         }
 
-        /// allocates a copy of vector a
-        pub fn copy(self: Self, a: Vector) !Vector {
-            return Vector{
-                .val = (try self.allocator.dupe(Scalar, a.val[0..a.len])).ptr,
-                .len = a.len,
-            };
-        }
-
         /// vector with runtime length
-        /// all functions in this struct are inplace and do not require memory allocation
         pub const Vector = struct {
             val: [*]Scalar,
             len: usize,
+            allocptr: *const std.mem.Allocator,
+
+            /// deinitialize Vector
+            pub fn deinit(a: Vector) void {
+                a.allocptr.free(a.val[0..a.len]);
+            }
+
+            /// allocates a copy of vector a
+            pub fn copy(a: Vector) !Vector {
+                return Vector{
+                    .val = (try a.allocptr.dupe(Scalar, a.val[0..a.len])).ptr,
+                    .len = a.len,
+                    .allocptr = a.allocptr,
+                };
+            }
 
             /// return element at index i
             pub fn at(a: Vector, i: usize) Scalar {
@@ -193,11 +194,11 @@ test "creation" {
 
     const n = 100;
     const F = @import("../scalar.zig").Float(f32);
-    const V = VectorType(F){ .allocator = allocator };
+    const V = VectorType(F){ .allocptr = &allocator };
 
     const a = F.from(-3.14);
     var v = try V.rep(a, n);
-    defer V.deinit(v);
+    defer v.deinit();
 
     try testing.expectEqual(@as(usize, n), v.len);
     for (0..n) |i| {
@@ -216,39 +217,39 @@ test "operators" {
 
     const n = 3;
     const F = @import("../scalar.zig").Float(f32);
-    const V = VectorType(F){ .allocator = allocator };
+    const V = VectorType(F){ .allocptr = &allocator };
 
     const a_ = F.from(-3.14);
     const b_ = F.from(5.27);
     var a = try V.rep(a_, n);
-    defer V.deinit(a);
+    defer a.deinit();
     a.set(1, F.zero);
     var b = try V.rep(b_, n);
-    defer V.deinit(b);
+    defer b.deinit();
     b.set(0, F.eye);
 
     try testing.expect(a.at(1).cmp(.equal, F.zero));
 
-    const c = (try V.copy(a)).add(b);
-    defer V.deinit(c);
+    const c = (try a.copy()).add(b);
+    defer c.deinit();
     try testing.expect(c.at(0).cmp(.equal, a_.add(F.eye)));
     try testing.expect(c.at(1).cmp(.equal, b_));
     try testing.expect(c.at(2).cmp(.equal, a_.add(b_)));
 
-    const d = (try V.copy(a)).add(b);
-    defer V.deinit(d);
+    const d = (try a.copy()).add(b);
+    defer d.deinit();
     try testing.expect(d.at(0).cmp(.equal, a_.add(F.eye)));
     try testing.expect(d.at(1).cmp(.equal, b_));
     try testing.expect(d.at(2).cmp(.equal, a_.add(b_)));
 
-    const e = (try V.copy(a)).mul(b);
-    defer V.deinit(e);
+    const e = (try a.copy()).mul(b);
+    defer e.deinit();
     try testing.expect(e.at(0).cmp(.equal, a_));
     try testing.expect(e.at(1).cmp(.equal, F.zero));
     try testing.expect(e.at(2).cmp(.equal, a_.mul(b_)));
 
-    const f = (try V.copy(a)).div(b);
-    defer V.deinit(f);
+    const f = (try a.copy()).div(b);
+    defer f.deinit();
     try testing.expect(f.at(0).cmp(.equal, a_));
     try testing.expect(f.at(1).cmp(.equal, F.zero));
     try testing.expect(f.at(2).cmp(.equal, a_.div(b_)));
