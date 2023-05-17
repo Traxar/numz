@@ -2,12 +2,24 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 
+//TODO:
+//transpose
+//add
+//sub
+//sub_
+//mul
+// matrix
+//LU
+// solve
+
 /// return struct that can allocate and free matrices
 /// operations by this struct result in a newly allocated matrix
 /// operation by the matrix struct are inplace
 pub fn MatrixType(comptime Scalar: type) type {
     return struct {
         const Self = @This();
+        const VectorType = @import("vector.zig").VectorType(Scalar);
+        const Vector = VectorType.Vector;
         allocator: std.mem.Allocator,
 
         fn init(self: Self, rows: usize, cols: usize) !Matrix {
@@ -58,7 +70,7 @@ pub fn MatrixType(comptime Scalar: type) type {
 
         /// sparse matrix with runtime size
         /// all functions in this struct are inplace
-        /// they might require memory allocation since this is a sparse datastructure
+        /// they might still require memory allocation since this is a sparse datastructure
         const Matrix = struct {
             const Row = std.MultiArrayList(struct { col: usize, val: Scalar });
             val: [*]Row,
@@ -100,6 +112,34 @@ pub fn MatrixType(comptime Scalar: type) type {
                 }
             }
 
+            fn indAt(a: Matrix, row: usize) usize {
+                return a.val[row].len;
+            }
+
+            /// return element at row and columnIndex
+            /// O(1)
+            fn valAt(a: Matrix, row: usize, colIndex: usize) Scalar {
+                assert(row < a.rows);
+                assert(colIndex < a.val[row].len);
+                return a.val[row].items(.val)[colIndex];
+            }
+
+            /// return column at row and columnIndex
+            /// O(1)
+            fn colAt(a: Matrix, row: usize, colIndex: usize) usize {
+                assert(row < a.rows);
+                assert(colIndex < a.val[row].len);
+                return a.val[row].items(.col)[colIndex];
+            }
+
+            /// set element at row and columnIndex
+            /// O(1)
+            fn setAt(a: Matrix, row: usize, colIndex: usize, b: Scalar) void {
+                assert(row < a.rows);
+                assert(colIndex < a.val[row].len);
+                a.val[row].items(.val)[colIndex] = b;
+            }
+
             // set element at row i and column j to b
             // O(m)
             pub fn set(a: Matrix, row: usize, col: usize, b: Scalar) !void {
@@ -112,12 +152,48 @@ pub fn MatrixType(comptime Scalar: type) type {
                     } // else do nothing
                 } else {
                     if (i.exists) {
-                        a.val[row].items(.val)[i.index] = b;
+                        a.setAt(row, i.index, b);
                     } else {
                         try a.val[row].insert(a.allocator, i.index, .{ .col = col, .val = b });
                     }
                 }
                 return;
+            }
+
+            /// a <- a * b
+            /// return a
+            /// O(n*m)
+            pub fn mulS(a: Matrix, b: Scalar) Matrix {
+                for (0..a.rows) |i| {
+                    for (0..a.indAt(i)) |j| {
+                        a.setAt(i, j, a.valAt(i, j).mul(b));
+                    }
+                }
+                return a;
+            }
+
+            /// return a * b
+            /// O(n*m)
+            pub fn mulV(a: Matrix, b: Vector) !Vector {
+                assert(a.cols == b.len);
+                var res = try (VectorType{ .allocator = a.allocator }).rep(Scalar.zero, a.rows);
+                for (0..a.rows) |i| {
+                    for (0..a.indAt(i)) |j| {
+                        res.set(i, res.at(i).add(a.valAt(i, j).mul(b.at(a.colAt(i, j)))));
+                    }
+                }
+                return res;
+            }
+
+            /// a <- a * b
+            /// return a
+            pub fn divS(a: Matrix, b: Scalar) Matrix {
+                for (0..a.rows) |i| {
+                    for (0..a.indAt(i)) |j| {
+                        a.setAt(i, j, a.valAt(i, j).div(b));
+                    }
+                }
+                return a;
             }
         };
     };
@@ -204,4 +280,73 @@ test "removing entries" {
     try a.set(2, 1, F.from(0));
 
     try testing.expectEqual(@as(usize, 0), a.val[2].len);
+}
+
+test "mulpiplication with scalar" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer {
+        const deinit_status = gpa.deinit();
+        //fail test; can't try in defer as defer is executed after we return
+        if (deinit_status == .leak) testing.expect(false) catch @panic("TEST FAIL");
+    }
+
+    const F = @import("../scalar.zig").Float(f32);
+    const M = MatrixType(F){ .allocator = allocator };
+
+    const n = 3;
+    const a_ = F.from(-3.14);
+    var a = (try M.eye(n)).mulS(a_);
+    defer M.deinit(a);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            if (i == j) {
+                try testing.expect(a.at(i, j).cmp(.equal, a_));
+            } else {
+                try testing.expect(a.at(i, j).cmp(.equal, F.zero));
+            }
+        }
+    }
+    _ = a.divS(a_);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            if (i == j) {
+                try testing.expect(a.at(i, j).cmp(.equal, a_.div(a_)));
+            } else {
+                try testing.expect(a.at(i, j).cmp(.equal, F.zero));
+            }
+        }
+    }
+}
+
+test "mulpiplication with vector" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer {
+        const deinit_status = gpa.deinit();
+        //fail test; can't try in defer as defer is executed after we return
+        if (deinit_status == .leak) testing.expect(false) catch @panic("TEST FAIL");
+    }
+
+    const F = @import("../scalar.zig").Float(f32);
+    const V = @import("vector.zig").VectorType(F){ .allocator = allocator };
+    const M = MatrixType(F){ .allocator = allocator };
+
+    const n = 3;
+    var a = try M.eye(n);
+    defer M.deinit(a);
+    try a.set(0, 2, F.from(-1));
+    try a.set(1, 0, F.from(-1));
+    try a.set(2, 1, F.from(-1));
+
+    var v = try V.rep(F.zero, n);
+    defer V.deinit(v);
+    v.set(1, F.from(1));
+    v.set(2, F.from(2));
+
+    const av = try a.mulV(v);
+    defer V.deinit(av);
+    try testing.expect(av.at(0).cmp(.equal, F.from(-2)));
+    try testing.expect(av.at(1).cmp(.equal, F.from(1)));
+    try testing.expect(av.at(2).cmp(.equal, F.from(1)));
 }

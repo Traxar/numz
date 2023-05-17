@@ -41,7 +41,7 @@ pub fn VectorType(comptime Scalar: type) type {
 
         /// vector with runtime length
         /// all functions in this struct are inplace and do not require memory allocation
-        const Vector = struct {
+        pub const Vector = struct {
             val: [*]Scalar,
             len: usize,
 
@@ -88,12 +88,30 @@ pub fn VectorType(comptime Scalar: type) type {
             }
 
             /// a <- a * b
+            /// return a
+            pub fn mulS(a: Vector, b: Scalar) Vector {
+                for (0..a.len) |i| {
+                    a.set(i, a.at(i).mul(b));
+                }
+                return a;
+            }
+
+            /// a <- a * b
             /// elemtentwise
             /// return a
             pub fn mul(a: Vector, b: Vector) Vector {
                 assert(a.len == b.len);
                 for (0..a.len) |i| {
                     a.set(i, a.at(i).mul(b.at(i)));
+                }
+                return a;
+            }
+
+            /// a <- a / b
+            /// return a
+            pub fn divS(a: Vector, b: Scalar) Vector {
+                for (0..a.len) |i| {
+                    a.set(i, a.at(i).div(b));
                 }
                 return a;
             }
