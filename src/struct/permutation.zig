@@ -82,14 +82,7 @@ pub const PermutationType = struct {
 };
 
 test "creation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        //fail test; can't try in defer as defer is executed after we return
-        if (deinit_status == .leak) testing.expect(false) catch @panic("TEST FAIL");
-    }
-
+    const allocator = std.testing.allocator;
     const P = PermutationType{ .allocator = allocator };
 
     const n = 100;
@@ -102,14 +95,7 @@ test "creation" {
 }
 
 test "manipulation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        //fail test; can't try in defer as defer is executed after we return
-        if (deinit_status == .leak) testing.expect(false) catch @panic("TEST FAIL");
-    }
-
+    const allocator = std.testing.allocator;
     const P = PermutationType{ .allocator = allocator };
 
     const n = 3;

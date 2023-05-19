@@ -9,6 +9,7 @@ pub fn VectorType(comptime Scalar: type) type {
         const Self = @This();
         allocptr: *const std.mem.Allocator,
 
+        ///allocate vector with undefined values
         fn init(self: Self, n: usize) !Vector {
             return Vector{
                 .val = (try self.allocptr.alloc(Scalar, n)).ptr,
@@ -17,7 +18,7 @@ pub fn VectorType(comptime Scalar: type) type {
             };
         }
 
-        /// allocates a vector with n elements with value a
+        /// allocate vector with n elements with value a
         pub fn rep(self: Self, a: Scalar, n: usize) !Vector {
             var res = try self.init(n);
             for (0..n) |i| {
@@ -26,18 +27,20 @@ pub fn VectorType(comptime Scalar: type) type {
             return res;
         }
 
+        //TODO: convert scalar to vector
+
         /// vector with runtime length
         pub const Vector = struct {
             val: [*]Scalar,
             len: usize,
             allocptr: *const std.mem.Allocator,
 
-            /// deinitialize Vector
+            /// deinitialize vector
             pub fn deinit(a: Vector) void {
                 a.allocptr.free(a.val[0..a.len]);
             }
 
-            /// allocates a copy of vector a
+            /// allocate copy of vector a
             pub fn copy(a: Vector) !Vector {
                 return Vector{
                     .val = (try a.allocptr.dupe(Scalar, a.val[0..a.len])).ptr,
@@ -184,14 +187,7 @@ pub fn VectorType(comptime Scalar: type) type {
 }
 
 test "creation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        //fail test; can't try in defer as defer is executed after we return
-        if (deinit_status == .leak) testing.expect(false) catch @panic("TEST FAIL");
-    }
-
+    const allocator = std.testing.allocator;
     const n = 100;
     const F = @import("../scalar.zig").Float(f32);
     const V = VectorType(F){ .allocptr = &allocator };
@@ -207,14 +203,7 @@ test "creation" {
 }
 
 test "operators" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        //fail test; can't try in defer as defer is executed after we return
-        if (deinit_status == .leak) testing.expect(false) catch @panic("TEST FAIL");
-    }
-
+    const allocator = std.testing.allocator;
     const n = 3;
     const F = @import("../scalar.zig").Float(f32);
     const V = VectorType(F){ .allocptr = &allocator };
