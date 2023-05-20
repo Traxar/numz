@@ -68,7 +68,8 @@ pub fn MatrixType(comptime Scalar: type) type {
                 a.allocptr.free(a.val[0..a.rows]);
             }
 
-            /// allocates copy of matrix a
+            /// b := a
+            /// return b
             pub fn copy(a: Matrix) !Matrix {
                 var res = try init(a.allocptr, a.rows, a.cols);
                 for (0..a.rows) |i| {
@@ -77,13 +78,14 @@ pub fn MatrixType(comptime Scalar: type) type {
                 return res;
             }
 
-            /// allocate transpose of matrix a
+            /// b := a^T
+            /// return b
             /// O(m*n)
             pub fn transpose(a: Matrix) !Matrix {
                 var res = try init(a.allocptr, a.cols, a.rows);
                 for (0..a.rows) |i| {
                     for (0..a.entAt(i)) |j| {
-                        try res.set(a.colAt(i, j), i, a.valAt(i, j));
+                        try res.set(a.colAt(i, j), i, a.valAt(i, j, true));
                     }
                 }
                 return res;
@@ -92,12 +94,12 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// return index of col in row
             /// performs binary search
             /// O(log(m)), O(1) if dense or last element of row
-            fn indAt(a: Matrix, row: usize, col: usize) struct { index: usize, exists: bool } {
+            fn indAt(a: Matrix, row: usize, col: usize) struct { ind: usize, ex: bool } {
                 const r = a.val[row].items(.col);
                 if (r.len == 0 or col > r[r.len - 1]) { // end of row
-                    return .{ .index = r.len, .exists = false };
+                    return .{ .ind = r.len, .ex = false };
                 } else if (col == r[r.len - 1]) { // last of row
-                    return .{ .index = r.len - 1, .exists = true };
+                    return .{ .ind = r.len - 1, .ex = true };
                 } else { // binary search
                     var min = r.len -| (a.cols - col);
                     var max = @min(r.len - 1, col); // - 1 because entry is not last of row
@@ -109,7 +111,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                             min = pivot + 1;
                         }
                     }
-                    return .{ .index = min, .exists = (min < r.len and col == r[min]) };
+                    return .{ .ind = min, .ex = (min < r.len and col == r[min]) };
                 }
             }
 
@@ -120,26 +122,41 @@ pub fn MatrixType(comptime Scalar: type) type {
 
             /// return element at row and columnIndex
             /// O(1)
-            fn valAt(a: Matrix, row: usize, colIndex: usize) Scalar {
+            fn valAt(a: Matrix, row: usize, i: usize, exists: bool) Scalar {
                 assert(row < a.rows);
-                assert(colIndex < a.val[row].len);
-                return a.val[row].items(.val)[colIndex];
+                assert(i <= a.val[row].len);
+                if (!exists) {
+                    return Scalar.zero;
+                } else {
+                    return a.val[row].items(.val)[i];
+                }
             }
 
-            /// return column at row and columnIndex
+            /// return column at row and columnIndex i
             /// O(1)
-            fn colAt(a: Matrix, row: usize, colIndex: usize) usize {
+            fn colAt(a: Matrix, row: usize, i: usize) usize {
                 assert(row < a.rows);
-                assert(colIndex < a.val[row].len);
-                return a.val[row].items(.col)[colIndex];
+                assert(i < a.val[row].len);
+                return a.val[row].items(.col)[i];
             }
 
-            /// set element at row and columnIndex
+            /// set element at row and columnIndex i
             /// O(1)
-            fn setAt(a: Matrix, row: usize, colIndex: usize, b: Scalar) void {
+            fn setAt(a: Matrix, row: usize, i: usize, exists: bool, col: usize, b: Scalar) !void {
                 assert(row < a.rows);
-                assert(colIndex < a.val[row].len);
-                a.val[row].items(.val)[colIndex] = b;
+                assert(col < a.cols);
+                assert(i <= a.val[row].len);
+                if (b.cmp(.equal, Scalar.zero)) {
+                    if (exists) {
+                        a.val[row].orderedRemove(i);
+                    } // else do nothing
+                } else {
+                    if (exists) {
+                        a.val[row].items(.val)[i] = b;
+                    } else {
+                        try a.val[row].insert(a.allocptr.*, i, .{ .col = col, .val = b });
+                    }
+                }
             }
 
             /// return element at row and column
@@ -148,8 +165,8 @@ pub fn MatrixType(comptime Scalar: type) type {
                 assert(row < a.rows);
                 assert(col < a.cols);
                 const i = a.indAt(row, col);
-                if (i.exists) {
-                    return a.val[row].items(.val)[i.index];
+                if (i.ex) {
+                    return a.val[row].items(.val)[i.ind];
                 } else {
                     return Scalar.zero;
                 }
@@ -162,18 +179,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                 assert(row < a.rows);
                 assert(col < a.cols);
                 const i = a.indAt(row, col);
-
-                if (b.cmp(.equal, Scalar.zero)) {
-                    if (i.exists) {
-                        a.val[row].orderedRemove(i.index);
-                    } // else do nothing
-                } else {
-                    if (i.exists) {
-                        a.setAt(row, i.index, b);
-                    } else {
-                        try a.val[row].insert(a.allocptr.*, i.index, .{ .col = col, .val = b });
-                    }
-                }
+                try a.setAt(row, i.ind, i.ex, col, b);
                 return;
             }
 
@@ -182,21 +188,43 @@ pub fn MatrixType(comptime Scalar: type) type {
             /// O(n*m)
             pub fn mulS(a: Matrix, b: Scalar) Matrix {
                 for (0..a.rows) |i| {
-                    for (0..a.entAt(i)) |j| {
-                        a.setAt(i, j, a.valAt(i, j).mul(b));
+                    const e = a.entAt(i);
+                    for (1..e + 1) |j_| {
+                        const j = e - j_;
+                        a.setAt(i, j, true, 0, a.valAt(i, j, true).mul(b)) catch unreachable;
                     }
                 }
                 return a;
             }
 
-            /// return a * b
+            /// c := a * b
+            /// return c
             /// O(n*m)
             pub fn mulV(a: Matrix, b: Vector) !Vector {
                 assert(a.cols == b.len);
                 var res = try (VectorType{ .allocptr = b.allocptr }).rep(Scalar.zero, a.rows);
                 for (0..a.rows) |i| {
                     for (0..a.entAt(i)) |j| {
-                        res.set(i, res.at(i).add(a.valAt(i, j).mul(b.at(a.colAt(i, j)))));
+                        res.set(i, res.at(i).add(a.valAt(i, j, true).mul(b.at(a.colAt(i, j)))));
+                    }
+                }
+                return res;
+            }
+
+            /// c := a * b
+            /// return c
+            /// O(n*m^2)
+            pub fn mul(a: Matrix, b: Matrix) !Matrix {
+                assert(a.cols == b.rows);
+                var res = try init(a.allocptr, a.rows, b.cols);
+                for (0..a.rows) |i| {
+                    for (0..a.entAt(i)) |j| {
+                        const r = a.colAt(i, j);
+                        for (0..b.entAt(r)) |k| {
+                            const c = b.colAt(r, k);
+                            const l = res.indAt(i, c);
+                            try res.setAt(i, l.ind, l.ex, c, res.valAt(i, l.ind, l.ex).add(a.valAt(i, j, true).mul(b.valAt(r, k, true))));
+                        }
                     }
                 }
                 return res;
@@ -204,10 +232,13 @@ pub fn MatrixType(comptime Scalar: type) type {
 
             /// a <- a * b
             /// return a
+            /// O(n*m)
             pub fn divS(a: Matrix, b: Scalar) Matrix {
                 for (0..a.rows) |i| {
-                    for (0..a.entAt(i)) |j| {
-                        a.setAt(i, j, a.valAt(i, j).div(b));
+                    const e = a.entAt(i);
+                    for (1..e + 1) |j_| {
+                        const j = e - j_;
+                        a.setAt(i, j, true, 0, a.valAt(i, j, true).div(b)) catch unreachable;
                     }
                 }
                 return a;
@@ -373,4 +404,46 @@ test "transpose" {
     try testing.expect(b.at(0, 2).cmp(.equal, F.from(8)));
     try testing.expect(b.at(1, 2).cmp(.equal, F.from(9)));
     try testing.expect(b.at(2, 2).cmp(.equal, F.from(7)));
+}
+
+test "matrix multiplication" {
+    const allocator = std.testing.allocator;
+    const F = @import("../scalar.zig").Float(f32);
+    const M = MatrixType(F){ .allocptr = &allocator };
+
+    // 2 1 3   1 0 1   2 1 6
+    // 6 0 5 * 0 1 1 = 6 0 11
+    // 8 9 7   0 0 1   8 9 24
+
+    var a = try M.zero(3, 3);
+    defer a.deinit();
+
+    try a.set(0, 1, F.from(1));
+    try a.set(0, 0, F.from(2));
+    try a.set(0, 2, F.from(3));
+    try a.set(1, 1, F.zero);
+    try a.set(1, 2, F.from(5));
+    try a.set(1, 0, F.from(6));
+    try a.set(2, 2, F.from(7));
+    try a.set(2, 0, F.from(8));
+    try a.set(2, 1, F.from(9));
+
+    var b = try M.eye(3);
+    defer b.deinit();
+
+    try b.set(0, 2, F.from(1));
+    try b.set(1, 2, F.from(1));
+
+    var c = try a.mul(b);
+    defer c.deinit();
+
+    try testing.expect(c.at(0, 0).cmp(.equal, F.from(2)));
+    try testing.expect(c.at(0, 1).cmp(.equal, F.from(1)));
+    try testing.expect(c.at(0, 2).cmp(.equal, F.from(6)));
+    try testing.expect(c.at(1, 0).cmp(.equal, F.from(6)));
+    try testing.expect(c.at(1, 1).cmp(.equal, F.from(0)));
+    try testing.expect(c.at(1, 2).cmp(.equal, F.from(11)));
+    try testing.expect(c.at(2, 0).cmp(.equal, F.from(8)));
+    try testing.expect(c.at(2, 1).cmp(.equal, F.from(9)));
+    try testing.expect(c.at(2, 2).cmp(.equal, F.from(24)));
 }
