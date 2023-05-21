@@ -3,14 +3,10 @@ const assert = std.debug.assert;
 const testing = std.testing;
 
 //TODO:
-//transpose
-//add
-//sub
-//sub_
-//mul
-// matrix
-//LU
-// solve
+// + add
+// + sub
+// + LU
+// + solve
 
 /// return struct that can create new matrices
 /// operations by this struct result in a newly allocated matrix

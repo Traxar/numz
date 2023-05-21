@@ -2,7 +2,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 
-/// TODO: keep track of inverse Permutation
+// TODO:
+// ? keep track of inverse permutations
+//   maybe second datastructure ?
+
 /// return struct that can create Permutations
 pub const PermutationType = struct {
     const Self = @This();

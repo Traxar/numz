@@ -1,7 +1,10 @@
 # Num
 This is a numerics library written in zig.
-Features:
+
+Planned Features:
     * type of scalars is easily interchangeable. In the future also truly deterministic decimals will be provided.
     * Vectors
     * Permutations
-    * Sparse matrices
+    * Sparse matrices: including LU solver
+    * Meshes
+    * PDE toolbox

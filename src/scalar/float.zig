@@ -2,6 +2,9 @@ const std = @import("std");
 const testing = std.testing;
 const Relation = @import("relation.zig").Relation;
 
+// TODO:
+// ~ change from to initalize from a fraction
+
 /// wrapper for the float datastructure
 /// choose float from {f16,f32,f64,f80,f128}
 pub fn Float(comptime float: type) type {
