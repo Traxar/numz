@@ -183,7 +183,7 @@ test "creation" {
     const F = @import("../scalar.zig").Float(f32);
     const V = VectorType(F);
 
-    const a = F.from(-314,100);
+    const a = F.from(-314, 100);
     var v = try V.rep(a, n, ally);
     defer v.deinit(ally);
 
@@ -199,8 +199,8 @@ test "operators" {
     const F = @import("../scalar.zig").Float(f32);
     const V = VectorType(F);
 
-    const a_ = F.from(-314,100);
-    const b_ = F.from(527,100);
+    const a_ = F.from(-314, 100);
+    const b_ = F.from(527, 100);
     var a = try V.rep(a_, n, ally);
     defer a.deinit(ally);
     a.set(1, F.zero);

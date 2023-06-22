@@ -21,7 +21,6 @@ pub fn MatrixType(comptime Scalar: type) type {
         cols: usize,
         allocator: Allocator,
 
-
         ///allocate empty matrix
         pub fn zero(rows: usize, cols: usize, allocator: Allocator) !Matrix {
             var res = Matrix{
@@ -274,25 +273,25 @@ test "removing entries" {
     // 6 0 5
     // 8 9 7
 
-    try a.set(0, 1, F.from(1,1));
-    try a.set(0, 0, F.from(2,1));
-    try a.set(0, 2, F.from(3,1));
+    try a.set(0, 1, F.from(1, 1));
+    try a.set(0, 0, F.from(2, 1));
+    try a.set(0, 2, F.from(3, 1));
     try a.set(1, 1, F.zero);
-    try a.set(1, 2, F.from(5,1));
-    try a.set(1, 0, F.from(6,1));
-    try a.set(2, 2, F.from(7,1));
-    try a.set(2, 0, F.from(8,1));
-    try a.set(2, 1, F.from(9,1));
+    try a.set(1, 2, F.from(5, 1));
+    try a.set(1, 0, F.from(6, 1));
+    try a.set(2, 2, F.from(7, 1));
+    try a.set(2, 0, F.from(8, 1));
+    try a.set(2, 1, F.from(9, 1));
 
-    try testing.expect(a.at(0, 0).cmp(.equal, F.from(2,1)));
-    try testing.expect(a.at(0, 1).cmp(.equal, F.from(1,1)));
-    try testing.expect(a.at(0, 2).cmp(.equal, F.from(3,1)));
-    try testing.expect(a.at(1, 0).cmp(.equal, F.from(6,1)));
-    try testing.expect(a.at(1, 1).cmp(.equal, F.from(0,1)));
-    try testing.expect(a.at(1, 2).cmp(.equal, F.from(5,1)));
-    try testing.expect(a.at(2, 0).cmp(.equal, F.from(8,1)));
-    try testing.expect(a.at(2, 1).cmp(.equal, F.from(9,1)));
-    try testing.expect(a.at(2, 2).cmp(.equal, F.from(7,1)));
+    try testing.expect(a.at(0, 0).cmp(.equal, F.from(2, 1)));
+    try testing.expect(a.at(0, 1).cmp(.equal, F.from(1, 1)));
+    try testing.expect(a.at(0, 2).cmp(.equal, F.from(3, 1)));
+    try testing.expect(a.at(1, 0).cmp(.equal, F.from(6, 1)));
+    try testing.expect(a.at(1, 1).cmp(.equal, F.from(0, 1)));
+    try testing.expect(a.at(1, 2).cmp(.equal, F.from(5, 1)));
+    try testing.expect(a.at(2, 0).cmp(.equal, F.from(8, 1)));
+    try testing.expect(a.at(2, 1).cmp(.equal, F.from(9, 1)));
+    try testing.expect(a.at(2, 2).cmp(.equal, F.from(7, 1)));
 
     try testing.expectEqual(@as(usize, 3), a.val[0].len);
     try testing.expectEqual(@as(usize, 2), a.val[1].len);
@@ -310,7 +309,7 @@ test "mulpiplication with scalar" {
     const M = MatrixType(F);
 
     const n = 3;
-    const a_ = F.from(-314,100);
+    const a_ = F.from(-314, 100);
     var a = (try M.eye(n, ally)).mulS(a_);
     defer a.deinit();
     for (0..n) |i| {
@@ -335,7 +334,7 @@ test "mulpiplication with scalar" {
 }
 
 test "mulpiplication with vector" {
-    const ally= std.testing.allocator;
+    const ally = std.testing.allocator;
     const F = @import("../scalar.zig").Float(f32);
     const V = @import("vector.zig").VectorType(F);
     const M = MatrixType(F);
@@ -349,14 +348,14 @@ test "mulpiplication with vector" {
 
     var v = try V.rep(F.zero, n, ally);
     defer v.deinit(ally);
-    v.set(1, F.from(1,1));
-    v.set(2, F.from(2,1));
+    v.set(1, F.from(1, 1));
+    v.set(2, F.from(2, 1));
 
     const av = try a.mulV(v, ally);
     defer av.deinit(ally);
-    try testing.expect(av.at(0).cmp(.equal, F.from(-2,1)));
-    try testing.expect(av.at(1).cmp(.equal, F.from(1,1)));
-    try testing.expect(av.at(2).cmp(.equal, F.from(1,1)));
+    try testing.expect(av.at(0).cmp(.equal, F.from(-2, 1)));
+    try testing.expect(av.at(1).cmp(.equal, F.from(1, 1)));
+    try testing.expect(av.at(2).cmp(.equal, F.from(1, 1)));
 }
 
 test "transpose" {
@@ -370,28 +369,28 @@ test "transpose" {
     // 6 0 5
     // 8 9 7
 
-    try a.set(0, 1, F.from(1,1));
-    try a.set(0, 0, F.from(2,1));
-    try a.set(0, 2, F.from(3,1));
+    try a.set(0, 1, F.from(1, 1));
+    try a.set(0, 0, F.from(2, 1));
+    try a.set(0, 2, F.from(3, 1));
     try a.set(1, 1, F.zero);
-    try a.set(1, 2, F.from(5,1));
-    try a.set(1, 0, F.from(6,1));
-    try a.set(2, 2, F.from(7,1));
-    try a.set(2, 0, F.from(8,1));
-    try a.set(2, 1, F.from(9,1));
+    try a.set(1, 2, F.from(5, 1));
+    try a.set(1, 0, F.from(6, 1));
+    try a.set(2, 2, F.from(7, 1));
+    try a.set(2, 0, F.from(8, 1));
+    try a.set(2, 1, F.from(9, 1));
 
     var b = try a.transpose(ally);
     defer b.deinit();
 
-    try testing.expect(b.at(0, 0).cmp(.equal, F.from(2,1)));
-    try testing.expect(b.at(1, 0).cmp(.equal, F.from(1,1)));
-    try testing.expect(b.at(2, 0).cmp(.equal, F.from(3,1)));
-    try testing.expect(b.at(0, 1).cmp(.equal, F.from(6,1)));
-    try testing.expect(b.at(1, 1).cmp(.equal, F.from(0,1)));
-    try testing.expect(b.at(2, 1).cmp(.equal, F.from(5,1)));
-    try testing.expect(b.at(0, 2).cmp(.equal, F.from(8,1)));
-    try testing.expect(b.at(1, 2).cmp(.equal, F.from(9,1)));
-    try testing.expect(b.at(2, 2).cmp(.equal, F.from(7,1)));
+    try testing.expect(b.at(0, 0).cmp(.equal, F.from(2, 1)));
+    try testing.expect(b.at(1, 0).cmp(.equal, F.from(1, 1)));
+    try testing.expect(b.at(2, 0).cmp(.equal, F.from(3, 1)));
+    try testing.expect(b.at(0, 1).cmp(.equal, F.from(6, 1)));
+    try testing.expect(b.at(1, 1).cmp(.equal, F.from(0, 1)));
+    try testing.expect(b.at(2, 1).cmp(.equal, F.from(5, 1)));
+    try testing.expect(b.at(0, 2).cmp(.equal, F.from(8, 1)));
+    try testing.expect(b.at(1, 2).cmp(.equal, F.from(9, 1)));
+    try testing.expect(b.at(2, 2).cmp(.equal, F.from(7, 1)));
 }
 
 test "matrix multiplication" {
@@ -406,32 +405,32 @@ test "matrix multiplication" {
     var a = try M.zero(3, 3, ally);
     defer a.deinit();
 
-    try a.set(0, 1, F.from(1,1));
-    try a.set(0, 0, F.from(2,1));
-    try a.set(0, 2, F.from(3,1));
+    try a.set(0, 1, F.from(1, 1));
+    try a.set(0, 0, F.from(2, 1));
+    try a.set(0, 2, F.from(3, 1));
     try a.set(1, 1, F.zero);
-    try a.set(1, 2, F.from(5,1));
-    try a.set(1, 0, F.from(6,1));
-    try a.set(2, 2, F.from(7,1));
-    try a.set(2, 0, F.from(8,1));
-    try a.set(2, 1, F.from(9,1));
+    try a.set(1, 2, F.from(5, 1));
+    try a.set(1, 0, F.from(6, 1));
+    try a.set(2, 2, F.from(7, 1));
+    try a.set(2, 0, F.from(8, 1));
+    try a.set(2, 1, F.from(9, 1));
 
     var b = try M.eye(3, ally);
     defer b.deinit();
 
-    try b.set(0, 2, F.from(1,1));
-    try b.set(1, 2, F.from(1,1));
+    try b.set(0, 2, F.from(1, 1));
+    try b.set(1, 2, F.from(1, 1));
 
     var c = try a.mul(b, ally);
     defer c.deinit();
 
-    try testing.expect(c.at(0, 0).cmp(.equal, F.from(2,1)));
-    try testing.expect(c.at(0, 1).cmp(.equal, F.from(1,1)));
-    try testing.expect(c.at(0, 2).cmp(.equal, F.from(6,1)));
-    try testing.expect(c.at(1, 0).cmp(.equal, F.from(6,1)));
-    try testing.expect(c.at(1, 1).cmp(.equal, F.from(0,1)));
-    try testing.expect(c.at(1, 2).cmp(.equal, F.from(11,1)));
-    try testing.expect(c.at(2, 0).cmp(.equal, F.from(8,1)));
-    try testing.expect(c.at(2, 1).cmp(.equal, F.from(9,1)));
-    try testing.expect(c.at(2, 2).cmp(.equal, F.from(24,1)));
+    try testing.expect(c.at(0, 0).cmp(.equal, F.from(2, 1)));
+    try testing.expect(c.at(0, 1).cmp(.equal, F.from(1, 1)));
+    try testing.expect(c.at(0, 2).cmp(.equal, F.from(6, 1)));
+    try testing.expect(c.at(1, 0).cmp(.equal, F.from(6, 1)));
+    try testing.expect(c.at(1, 1).cmp(.equal, F.from(0, 1)));
+    try testing.expect(c.at(1, 2).cmp(.equal, F.from(11, 1)));
+    try testing.expect(c.at(2, 0).cmp(.equal, F.from(8, 1)));
+    try testing.expect(c.at(2, 1).cmp(.equal, F.from(9, 1)));
+    try testing.expect(c.at(2, 2).cmp(.equal, F.from(24, 1)));
 }
