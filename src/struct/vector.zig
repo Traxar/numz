@@ -1,200 +1,191 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
+const Allocator = std.mem.Allocator;
 
 /// return struct that can allocate and free vectors
 /// operations by this struct create new vectors
 pub fn VectorType(comptime Scalar: type) type {
     return struct {
-        const Self = @This();
-        allocptr: *const std.mem.Allocator,
+        const Vector = @This();
+        val: [*]Scalar,
+        len: usize,
 
         ///allocate vector with undefined values
-        fn init(self: Self, n: usize) !Vector {
+        fn init(n: usize, allocator: Allocator) !Vector {
             return Vector{
-                .val = (try self.allocptr.alloc(Scalar, n)).ptr,
+                .val = (try allocator.alloc(Scalar, n)).ptr,
                 .len = n,
-                .allocptr = self.allocptr,
             };
         }
 
         /// allocate vector with n elements with value a
-        pub fn rep(self: Self, a: Scalar, n: usize) !Vector {
-            var res = try self.init(n);
+        pub fn rep(a: Scalar, n: usize, allocator: Allocator) !Vector {
+            var res = try Vector.init(n, allocator);
             for (0..n) |i| {
                 res.set(i, a);
             }
             return res;
         }
 
-        //TODO: convert scalar to vector
+        /// deinitialize vector
+        pub fn deinit(a: Vector, allocator: Allocator) void {
+            allocator.free(a.val[0..a.len]);
+        }
 
-        /// vector with runtime length
-        pub const Vector = struct {
-            val: [*]Scalar,
-            len: usize,
-            allocptr: *const std.mem.Allocator,
+        /// allocate copy of vector a
+        pub fn copy(a: Vector, allocator: Allocator) !Vector {
+            return Vector{
+                .val = (try allocator.dupe(Scalar, a.val[0..a.len])).ptr,
+                .len = a.len,
+            };
+        }
 
-            /// deinitialize vector
-            pub fn deinit(a: Vector) void {
-                a.allocptr.free(a.val[0..a.len]);
+        /// return element at index i
+        pub fn at(a: Vector, i: usize) Scalar {
+            assert(i < a.len);
+            return a.val[i];
+        }
+
+        /// set element at index i to b
+        pub fn set(a: Vector, i: usize, b: Scalar) void {
+            assert(i < a.len);
+            a.val[i] = b;
+        }
+
+        /// a <- a + b
+        /// return a
+        pub fn add(a: Vector, b: Vector) Vector {
+            assert(a.len == b.len);
+            for (0..a.len) |i| {
+                a.set(i, a.at(i).add(b.at(i)));
             }
+            return a;
+        }
 
-            /// allocate copy of vector a
-            pub fn copy(a: Vector) !Vector {
-                return Vector{
-                    .val = (try a.allocptr.dupe(Scalar, a.val[0..a.len])).ptr,
-                    .len = a.len,
-                    .allocptr = a.allocptr,
-                };
+        /// a <- a - b
+        /// return a
+        pub fn sub(a: Vector, b: Vector) Vector {
+            assert(a.len == b.len);
+            for (0..a.len) |i| {
+                a.set(i, a.at(i).sub(b.at(i)));
             }
+            return a;
+        }
 
-            /// return element at index i
-            pub fn at(a: Vector, i: usize) Scalar {
-                assert(i < a.len);
-                return a.val[i];
+        /// a <- b - a
+        /// return a
+        pub fn sub_(a: Vector, b: Vector) Vector { //TODO: change name
+            assert(a.len == b.len);
+            for (0..a.len) |i| {
+                a.set(i, b.at(i).sub(a.at(i)));
             }
+            return a;
+        }
 
-            /// set element at index i to b
-            pub fn set(a: Vector, i: usize, b: Scalar) void {
-                assert(i < a.len);
-                a.val[i] = b;
+        /// a <- a * b
+        /// return a
+        pub fn mulS(a: Vector, b: Scalar) Vector {
+            for (0..a.len) |i| {
+                a.set(i, a.at(i).mul(b));
             }
+            return a;
+        }
 
-            /// a <- a + b
-            /// return a
-            pub fn add(a: Vector, b: Vector) Vector {
-                assert(a.len == b.len);
-                for (0..a.len) |i| {
-                    a.set(i, a.at(i).add(b.at(i)));
-                }
-                return a;
+        /// a <- a * b
+        /// elemtentwise
+        /// return a
+        pub fn mul(a: Vector, b: Vector) Vector {
+            assert(a.len == b.len);
+            for (0..a.len) |i| {
+                a.set(i, a.at(i).mul(b.at(i)));
             }
+            return a;
+        }
 
-            /// a <- a - b
-            /// return a
-            pub fn sub(a: Vector, b: Vector) Vector {
-                assert(a.len == b.len);
-                for (0..a.len) |i| {
-                    a.set(i, a.at(i).sub(b.at(i)));
-                }
-                return a;
+        /// a <- a / b
+        /// return a
+        pub fn divS(a: Vector, b: Scalar) Vector {
+            for (0..a.len) |i| {
+                a.set(i, a.at(i).div(b));
             }
+            return a;
+        }
 
-            /// a <- b - a
-            /// return a
-            pub fn sub_(a: Vector, b: Vector) Vector { //TODO: change name
-                assert(a.len == b.len);
-                for (0..a.len) |i| {
-                    a.set(i, b.at(i).sub(a.at(i)));
-                }
-                return a;
+        /// a <- a / b
+        /// elementwise
+        /// return a
+        pub fn div(a: Vector, b: Vector) Vector {
+            assert(a.len == b.len);
+            for (0..a.len) |i| {
+                a.set(i, a.at(i).div(b.at(i)));
             }
+            return a;
+        }
 
-            /// a <- a * b
-            /// return a
-            pub fn mulS(a: Vector, b: Scalar) Vector {
-                for (0..a.len) |i| {
-                    a.set(i, a.at(i).mul(b));
-                }
-                return a;
+        /// a <- b / a
+        /// elementwise
+        /// return a
+        pub fn div_(a: Vector, b: Vector) Vector { //TODO: change name
+            assert(a.len == b.len);
+            for (0..a.len) |i| {
+                a.set(i, b.at(i).div(a.at(i)));
             }
+            return a;
+        }
 
-            /// a <- a * b
-            /// elemtentwise
-            /// return a
-            pub fn mul(a: Vector, b: Vector) Vector {
-                assert(a.len == b.len);
-                for (0..a.len) |i| {
-                    a.set(i, a.at(i).mul(b.at(i)));
-                }
-                return a;
+        /// return sum of elements
+        pub fn sum(a: Vector) Scalar {
+            var res = Scalar.zero;
+            for (0..a.len) |i| {
+                res = res.add(a.at(i));
             }
+            return res;
+        }
 
-            /// a <- a / b
-            /// return a
-            pub fn divS(a: Vector, b: Scalar) Vector {
-                for (0..a.len) |i| {
-                    a.set(i, a.at(i).div(b));
-                }
-                return a;
+        ///return the scalar product of a and b
+        pub fn dot(a: Vector, b: Vector) Scalar {
+            var res = Scalar.zero;
+            for (0..a.len) |i| {
+                res = res.add(a.at(i).mul(b.at(i)));
             }
+            return res;
+        }
 
-            /// a <- a / b
-            /// elementwise
-            /// return a
-            pub fn div(a: Vector, b: Vector) Vector {
-                assert(a.len == b.len);
-                for (0..a.len) |i| {
-                    a.set(i, a.at(i).div(b.at(i)));
-                }
-                return a;
-            }
+        ///return the euklidean norm
+        pub fn norm(a: Vector) Scalar {
+            return a.dot(a).sqrt();
+        }
 
-            /// a <- b / a
-            /// elementwise
-            /// return a
-            pub fn div_(a: Vector, b: Vector) Vector { //TODO: change name
-                assert(a.len == b.len);
-                for (0..a.len) |i| {
-                    a.set(i, b.at(i).div(a.at(i)));
-                }
-                return a;
+        ///return the smallest element
+        pub fn min(a: Vector) Scalar {
+            var res = a.at(0);
+            for (1..a.len) |i| {
+                res = res.min(a.at(i));
             }
+            return res;
+        }
 
-            /// return sum of elements
-            pub fn sum(a: Vector) Scalar {
-                var res = Scalar.zero;
-                for (0..a.len) |i| {
-                    res = res.add(a.at(i));
-                }
-                return res;
+        ///return the largest element
+        pub fn max(a: Vector) Scalar {
+            var res = a.at(0);
+            for (1..a.len) |i| {
+                res = res.max(a.at(i));
             }
-
-            ///return the scalar product of a and b
-            pub fn dot(a: Vector, b: Vector) Scalar {
-                var res = Scalar.zero;
-                for (0..a.len) |i| {
-                    res = res.add(a.at(i).mul(b.at(i)));
-                }
-                return res;
-            }
-
-            ///return the euklidean norm
-            pub fn norm(a: Vector) Scalar {
-                return a.dot(a).sqrt();
-            }
-
-            ///return the smallest element
-            pub fn min(a: Vector) Scalar {
-                var res = a.at(0);
-                for (1..a.len) |i| {
-                    res = res.min(a.at(i));
-                }
-                return res;
-            }
-
-            ///return the largest element
-            pub fn max(a: Vector) Scalar {
-                var res = a.at(0);
-                for (1..a.len) |i| {
-                    res = res.max(a.at(i));
-                }
-                return res;
-            }
-        };
+            return res;
+        }
     };
 }
 
 test "creation" {
-    const allocator = std.testing.allocator;
+    const ally = std.testing.allocator;
     const n = 100;
     const F = @import("../scalar.zig").Float(f32);
-    const V = VectorType(F){ .allocptr = &allocator };
+    const V = VectorType(F);
 
-    const a = F.from(-3.14);
-    var v = try V.rep(a, n);
-    defer v.deinit();
+    const a = F.from(-314,100);
+    var v = try V.rep(a, n, ally);
+    defer v.deinit(ally);
 
     try testing.expectEqual(@as(usize, n), v.len);
     for (0..n) |i| {
@@ -203,42 +194,42 @@ test "creation" {
 }
 
 test "operators" {
-    const allocator = std.testing.allocator;
+    const ally = std.testing.allocator;
     const n = 3;
     const F = @import("../scalar.zig").Float(f32);
-    const V = VectorType(F){ .allocptr = &allocator };
+    const V = VectorType(F);
 
-    const a_ = F.from(-3.14);
-    const b_ = F.from(5.27);
-    var a = try V.rep(a_, n);
-    defer a.deinit();
+    const a_ = F.from(-314,100);
+    const b_ = F.from(527,100);
+    var a = try V.rep(a_, n, ally);
+    defer a.deinit(ally);
     a.set(1, F.zero);
-    var b = try V.rep(b_, n);
-    defer b.deinit();
+    var b = try V.rep(b_, n, ally);
+    defer b.deinit(ally);
     b.set(0, F.eye);
 
     try testing.expect(a.at(1).cmp(.equal, F.zero));
 
-    const c = (try a.copy()).add(b);
-    defer c.deinit();
+    const c = (try a.copy(ally)).add(b);
+    defer c.deinit(ally);
     try testing.expect(c.at(0).cmp(.equal, a_.add(F.eye)));
     try testing.expect(c.at(1).cmp(.equal, b_));
     try testing.expect(c.at(2).cmp(.equal, a_.add(b_)));
 
-    const d = (try a.copy()).add(b);
-    defer d.deinit();
+    const d = (try a.copy(ally)).add(b);
+    defer d.deinit(ally);
     try testing.expect(d.at(0).cmp(.equal, a_.add(F.eye)));
     try testing.expect(d.at(1).cmp(.equal, b_));
     try testing.expect(d.at(2).cmp(.equal, a_.add(b_)));
 
-    const e = (try a.copy()).mul(b);
-    defer e.deinit();
+    const e = (try a.copy(ally)).mul(b);
+    defer e.deinit(ally);
     try testing.expect(e.at(0).cmp(.equal, a_));
     try testing.expect(e.at(1).cmp(.equal, F.zero));
     try testing.expect(e.at(2).cmp(.equal, a_.mul(b_)));
 
-    const f = (try a.copy()).div(b);
-    defer f.deinit();
+    const f = (try a.copy(ally)).div(b);
+    defer f.deinit(ally);
     try testing.expect(f.at(0).cmp(.equal, a_));
     try testing.expect(f.at(1).cmp(.equal, F.zero));
     try testing.expect(f.at(2).cmp(.equal, a_.div(b_)));

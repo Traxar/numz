@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const Error = std.mem.Allocator.Error || error{Undefined};
+pub const Error = std.mem.Allocator.Error || error{UndefinedMath};
 //TODO:
 // ? currently unused, maybe define all operations on example Error!Vector
 //  + avoid needing try statements in the calculations

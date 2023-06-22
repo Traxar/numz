@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
+const assert = std.debug.assert;
 const Relation = @import("relation.zig").Relation;
+const Allocator = std.mem.Allocator;
 
 // TODO:
 // ~ change from to initalize from a fraction
@@ -19,8 +21,9 @@ pub fn Float(comptime float: type) type {
         pub const eye = Scalar{ .f = 1 };
 
         /// return element isomorph to f
-        pub fn from(f: float) Scalar {
-            return Scalar{ .f = f };
+        pub fn from(p: isize, q: usize) Scalar {
+            assert(q!=0);
+            return Scalar{ .f = @intToFloat(float,p) / @intToFloat(float,q)  };
         }
 
         /// returns a + b
@@ -84,8 +87,7 @@ test "creation" {
         try testing.expectEqual(@as(f, 0), F.zero.f);
         try testing.expectEqual(@as(f, 1), F.eye.f);
 
-        const x: f = -3.14;
-        try testing.expectEqual(x, F.from(x).f);
+        try testing.expectEqual(@as(f,-3.14), F.from(-314,100).f);
     }
 }
 
@@ -93,18 +95,19 @@ test "operators" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
-        const a_: f = -3.14;
-        const b_: f = 5.27;
-        const a = F.from(a_);
-        const b = F.from(b_);
-        try testing.expectEqual(F.from(a_ + b_), a.add(b));
-        try testing.expectEqual(F.from(a_ - b_), a.sub(b));
-        try testing.expectEqual(F.from(b_ - a_), b.sub(a));
-        try testing.expectEqual(F.from(a_ * b_), a.mul(b));
-        try testing.expectEqual(F.from(a_ / b_), a.div(b));
-        try testing.expectEqual(F.from(b_ / a_), b.div(a));
-        try testing.expectEqual(F.from(@fabs(a_)), a.abs());
-        try testing.expectEqual(F.from(@sqrt(b_)), b.sqrt());
+        const q = 100;
+        const a_ = -314;
+        const b_ = 527;
+        const a = F.from(a_,q);
+        const b = F.from(b_,q);
+        try testing.expectEqual(a.f + b.f, a.add(b).f);
+        try testing.expectEqual(a.f - b.f, a.sub(b).f);
+        try testing.expectEqual(b.f - a.f, b.sub(a).f);
+        try testing.expectEqual(a.f * b.f, a.mul(b).f);
+        try testing.expectEqual(a.f / b.f, a.div(b).f);
+        try testing.expectEqual(b.f / a.f, b.div(a).f);
+        try testing.expectEqual(@fabs(a.f), a.abs().f);
+        try testing.expectEqual(@sqrt(b.f), b.sqrt().f);
     }
 }
 
@@ -112,8 +115,8 @@ test "comparisons" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
-        const a = F.from(-3.14);
-        const b = F.from(5.27);
+        const a = F.from(-314,100);
+        const b = F.from(527,100);
         try testing.expect(a.cmp(.less, b));
         try testing.expect(a.cmp(.lessEqual, b));
         try testing.expect(!a.cmp(.equal, b));
