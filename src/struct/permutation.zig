@@ -67,7 +67,7 @@ pub const Permutation = struct {
 
     /// swaps the two elements at i and j in the permutation.
     /// The operation is performed on a.
-    pub fn swap(a: Permutation, i: usize, j: usize) Permutation {
+    pub fn swap(a: Permutation, i: usize, j: usize) void {
         assert(i < a.len);
         assert(j < a.len);
         const value_i = a.val[i];
@@ -76,7 +76,6 @@ pub const Permutation = struct {
         a.val[j] = value_i;
         a.inv[value_i] = j;
         a.inv[value_j] = i;
-        return a;
     }
 
     /// swaps the two elements at i and j in the initail configuration.
@@ -94,13 +93,21 @@ pub const Permutation = struct {
     }
 
     /// set a to: a applied to b
-    pub fn applyTo(a: Permutation, b: Permutation) Permutation {
+    pub fn applyTo(a: Permutation, b: Permutation) void {
         assert(a.len == b.len);
         for (0..a.len) |i| {
             a.val[i] = b.at(a.val[i]);
             a.inv[a.val[i]] = i;
         }
-        return a;
+    }
+
+    /// set a to: b applied to a
+    pub fn apply(a: Permutation, b: Permutation) void {
+        assert(a.len == b.len);
+        for (0..a.len) |i| {
+            a.inv[i] = b.atInv(a.inv[i]);
+            a.val[a.inv[i]] = i;
+        }
     }
 };
 
@@ -122,8 +129,10 @@ test "manipulation" {
     const P = Permutation;
 
     const n = 4;
-    const a = (try P.eye(n, ally)).swap(1, 2).swap(0, 1);
+    var a = try P.eye(n, ally);
     defer a.deinit(ally);
+    a.swap(1, 2);
+    a.swap(0, 1);
     try testing.expectEqual(@as(usize, 2), a.at(0));
     try testing.expectEqual(@as(usize, 0), a.at(1));
     try testing.expectEqual(@as(usize, 1), a.at(2));
@@ -134,10 +143,10 @@ test "manipulation" {
     try testing.expectEqual(@as(usize, 0), a.atInv(2));
     try testing.expectEqual(@as(usize, 3), a.atInv(3));
 
-    const b_ = (try P.eye(n, ally)).swap(0, 3);
-    defer b_.deinit(ally);
-    const b = (try a.copy(ally)).applyTo(b_);
+    var b = try P.eye(n, ally);
     defer b.deinit(ally);
+    b.swap(0, 3);
+    b.apply(a);
     try testing.expectEqual(@as(usize, 2), b.at(0));
     try testing.expectEqual(@as(usize, 3), b.at(1));
     try testing.expectEqual(@as(usize, 1), b.at(2));
@@ -148,8 +157,9 @@ test "manipulation" {
     try testing.expectEqual(@as(usize, 0), b.atInv(2));
     try testing.expectEqual(@as(usize, 1), b.atInv(3));
 
-    const c = (try P.inv(b, ally)).applyTo(b);
+    var c = try P.inv(b, ally);
     defer c.deinit(ally);
+    c.applyTo(b);
     try testing.expectEqual(@as(usize, 0), c.at(0));
     try testing.expectEqual(@as(usize, 1), c.at(1));
     try testing.expectEqual(@as(usize, 2), c.at(2));

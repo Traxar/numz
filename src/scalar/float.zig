@@ -23,7 +23,7 @@ pub fn Float(comptime float: type) type {
         /// return element isomorph to f
         pub fn from(p: isize, q: usize) Scalar {
             assert(q != 0);
-            return Scalar{ .f = @floatFromInt(float, p) / @floatFromInt(float, q) };
+            return Scalar{ .f = @as(float, @floatFromInt(p)) / @as(float, @floatFromInt(q)) };
         }
 
         /// returns a + b
