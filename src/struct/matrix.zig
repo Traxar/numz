@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const PPQ = @import("utils/permutationPriorityQueue.zig").PermutationPriorityQueue;
 
 //TODO:
 // + add
@@ -433,4 +434,8 @@ test "matrix multiplication" {
     try testing.expect(c.at(2, 0).cmp(.equal, F.from(8, 1)));
     try testing.expect(c.at(2, 1).cmp(.equal, F.from(9, 1)));
     try testing.expect(c.at(2, 2).cmp(.equal, F.from(24, 1)));
+}
+
+test "LU" {
+    _ = PPQ;
 }
