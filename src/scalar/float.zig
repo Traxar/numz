@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
-const Relation = @import("relation.zig").Relation;
+const CompareOperator = std.math.CompareOperator;
 const Allocator = std.mem.Allocator;
 
 // TODO:
@@ -56,15 +56,9 @@ pub fn Float(comptime float: type) type {
             return Scalar{ .f = @sqrt(a.f) };
         }
 
-        /// returns a R b
-        pub fn cmp(a: Scalar, R: Relation, b: Scalar) bool {
-            if (a.f < b.f) {
-                return Relation.less.imp(R);
-            } else if (a.f == b.f) {
-                return Relation.equal.imp(R);
-            } else {
-                return Relation.greater.imp(R);
-            }
+        /// returns truth value of: a r b
+        pub fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
+            return std.math.order(a.f, b.f).compare(r);
         }
 
         ///returns the minimum of a and b
@@ -117,25 +111,25 @@ test "comparisons" {
         const F = Float(f);
         const a = F.from(-314, 100);
         const b = F.from(527, 100);
-        try testing.expect(a.cmp(.less, b));
-        try testing.expect(a.cmp(.lessEqual, b));
-        try testing.expect(!a.cmp(.equal, b));
-        try testing.expect(!a.cmp(.greaterEqual, b));
-        try testing.expect(!a.cmp(.greater, b));
+        try testing.expect(a.cmp(.lt, b));
+        try testing.expect(a.cmp(.lte, b));
+        try testing.expect(!a.cmp(.eq, b));
+        try testing.expect(!a.cmp(.gte, b));
+        try testing.expect(!a.cmp(.gt, b));
 
-        try testing.expect(!b.cmp(.less, a));
-        try testing.expect(!b.cmp(.lessEqual, a));
-        try testing.expect(!b.cmp(.equal, a));
-        try testing.expect(b.cmp(.greaterEqual, a));
-        try testing.expect(b.cmp(.greater, a));
+        try testing.expect(!b.cmp(.lt, a));
+        try testing.expect(!b.cmp(.lte, a));
+        try testing.expect(!b.cmp(.eq, a));
+        try testing.expect(b.cmp(.gte, a));
+        try testing.expect(b.cmp(.gt, a));
 
-        try testing.expect(!a.cmp(.less, a));
-        try testing.expect(a.cmp(.lessEqual, a));
-        try testing.expect(a.cmp(.equal, a));
-        try testing.expect(a.cmp(.greaterEqual, a));
-        try testing.expect(!a.cmp(.greater, a));
+        try testing.expect(!a.cmp(.lt, a));
+        try testing.expect(a.cmp(.lte, a));
+        try testing.expect(a.cmp(.eq, a));
+        try testing.expect(a.cmp(.gte, a));
+        try testing.expect(!a.cmp(.gt, a));
 
-        try testing.expect(a.min(b).cmp(.equal, a));
-        try testing.expect(a.max(b).cmp(.equal, b));
+        try testing.expect(a.min(b).cmp(.eq, a));
+        try testing.expect(a.max(b).cmp(.eq, b));
     }
 }

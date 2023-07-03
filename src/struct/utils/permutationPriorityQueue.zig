@@ -26,6 +26,11 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             self.items.deinit(allocator);
         }
 
+        pub fn deinitToPermutation(self: Self, allocator: Allocator) Permutation {
+            allocator.free(self.priorities[0..self.items.len]);
+            return self.items;
+        }
+
         pub fn capacity(self: Self) usize {
             return self.items.len;
         }
@@ -128,7 +133,7 @@ test "queueing elements" {
     };
     const PPQ = PermutationPriorityQueue(f32, P.lt);
     var queue = try PPQ.init(6, ally);
-    defer queue.deinit(ally);
+    //defer queue.deinit(ally);
 
     queue.set(1, 1);
     try testing.expectEqual(@as(usize, 1), queue.peek());
@@ -156,4 +161,13 @@ test "queueing elements" {
     try testing.expectEqual(@as(usize, 1), queue.remove());
     try testing.expectEqual(@as(usize, 3), queue.remove());
     try testing.expectEqual(@as(usize, 4), queue.remove());
+
+    const order = queue.deinitToPermutation(ally);
+    defer order.deinit(ally);
+    try testing.expectEqual(@as(usize, 5), order.at(0));
+    try testing.expectEqual(@as(usize, 2), order.at(1));
+    try testing.expectEqual(@as(usize, 0), order.at(2));
+    try testing.expectEqual(@as(usize, 1), order.at(3));
+    try testing.expectEqual(@as(usize, 3), order.at(4));
+    try testing.expectEqual(@as(usize, 4), order.at(5));
 }

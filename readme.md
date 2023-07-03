@@ -6,7 +6,7 @@ Planned Features:
     [x] type of scalars is easily interchangeable.
     [ ] provide truly deterministic decimals.
     [x] Vectors
-    [ ] Permutations
+    [x] Permutations
     [ ] Sparse matrices: including LU solver
     [ ] Meshes
     [ ] PDE toolbox

@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const PPQ = @import("utils/permutationPriorityQueue.zig").PermutationPriorityQueue;
+const Permutation = @import("permutation.zig").Permutation;
 
 //TODO:
 // + add
@@ -111,39 +112,40 @@ pub fn MatrixType(comptime Scalar: type) type {
 
         /// return element at row and columnIndex
         /// O(1)
-        fn valAt(a: Matrix, row: usize, i: usize, exists: bool) Scalar {
+        /// TODO change to not take bool as input, assume existance
+        fn valAt(a: Matrix, row: usize, ind: usize, exists: bool) Scalar {
             assert(row < a.rows);
-            assert(i <= a.val[row].len);
+            assert(ind <= a.val[row].len);
             if (!exists) {
                 return Scalar.zero;
             } else {
-                return a.val[row].items(.val)[i];
+                return a.val[row].items(.val)[ind];
             }
         }
 
         /// return column at row and columnIndex i
         /// O(1)
-        fn colAt(a: Matrix, row: usize, i: usize) usize {
+        fn colAt(a: Matrix, row: usize, ind: usize) usize {
             assert(row < a.rows);
-            assert(i < a.val[row].len);
-            return a.val[row].items(.col)[i];
+            assert(ind < a.val[row].len);
+            return a.val[row].items(.col)[ind];
         }
 
         /// set element at row and columnIndex i
         /// O(1)
-        fn setAt(a: Matrix, row: usize, i: usize, exists: bool, col: usize, b: Scalar) !void {
+        fn setAt(a: Matrix, row: usize, ind: usize, exists: bool, col: usize, b: Scalar) !void {
             assert(row < a.rows);
             assert(col < a.cols);
-            assert(i <= a.val[row].len);
-            if (b.cmp(.equal, Scalar.zero)) {
+            assert(ind <= a.val[row].len);
+            if (b.cmp(.eq, Scalar.zero)) {
                 if (exists) {
-                    a.val[row].orderedRemove(i);
+                    a.val[row].orderedRemove(ind);
                 } // else do nothing
             } else {
                 if (exists) {
-                    a.val[row].items(.val)[i] = b;
+                    a.val[row].items(.val)[ind] = b;
                 } else {
-                    try a.val[row].insert(a.allocator, i, .{ .col = col, .val = b });
+                    try a.val[row].insert(a.allocator, ind, .{ .col = col, .val = b });
                 }
             }
         }
@@ -232,6 +234,63 @@ pub fn MatrixType(comptime Scalar: type) type {
             }
             return a;
         }
+
+        const LU = struct {
+            //PAQ=LU
+            p: Permutation,
+            q: Permutation,
+            l: Matrix,
+            q: Matrix,
+
+            pub fn deinit(self: LU, allocator: Allocator) void {
+                self.p.deinit(allocator);
+                self.q.deinit(allocator);
+                self.l.deinit(allocator);
+                self.u.deinit(allocator);
+            }
+        };
+
+        pub fn decompLU(a: Matrix, allocator: Allocator) !LU {
+            assert(a.rows == a.cols);
+            const n = a.rows;
+            // count nonzeros for each column
+            var nz_column = try allocator.alloc(usize, n);
+            defer allocator.free(nz_column);
+            for (0..n) |i| {
+                nz_column[i] = 0;
+            }
+            for (0..n) |i| {
+                for (0..a.entAt(i)) |j| {
+                    nz_column[a.colAt(i, j)] += 1;
+                }
+            }
+            //initialize the priority queue for row pivoting
+            const RowPriority = struct {
+                const Self = @This();
+                nonzeros: usize,
+                norm1: Scalar,
+
+                pub fn before(self: Self, other: Self) bool {
+                    if (self.nonzeros < other.nonzeros) return true;
+                    if (self.nonzeros == other.nonzeros and self.norm1.cmp(.lt, other.norm1)) return true;
+                    return false;
+                }
+            };
+            var row_queue = try PPQ(RowPriority, RowPriority.before).init(n, allocator);
+            for (0..n) |i| {
+                var row_priority = RowPriority{
+                    .nonzeros = a.entAt(i),
+                    .norm1 = Scalar.zero,
+                };
+                for (0..a.entAt(i)) |j| {
+                    row_priority.norm1 = row_priority.norm1.add(a.valAt(i, j, true));
+                }
+                row_queue.set(i, row_priority);
+            }
+            //elimination
+
+            return LU{};
+        }
     };
 }
 
@@ -246,7 +305,7 @@ test "creation" {
     defer a.deinit();
     for (0..n) |i| {
         for (0..m) |j| {
-            try testing.expect(a.at(i, j).cmp(.equal, F.zero));
+            try testing.expect(a.at(i, j).cmp(.eq, F.zero));
         }
     }
 
@@ -255,9 +314,9 @@ test "creation" {
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
-                try testing.expect(b.at(i, j).cmp(.equal, F.eye));
+                try testing.expect(b.at(i, j).cmp(.eq, F.eye));
             } else {
-                try testing.expect(b.at(i, j).cmp(.equal, F.zero));
+                try testing.expect(b.at(i, j).cmp(.eq, F.zero));
             }
         }
     }
@@ -284,15 +343,15 @@ test "removing entries" {
     try a.set(2, 0, F.from(8, 1));
     try a.set(2, 1, F.from(9, 1));
 
-    try testing.expect(a.at(0, 0).cmp(.equal, F.from(2, 1)));
-    try testing.expect(a.at(0, 1).cmp(.equal, F.from(1, 1)));
-    try testing.expect(a.at(0, 2).cmp(.equal, F.from(3, 1)));
-    try testing.expect(a.at(1, 0).cmp(.equal, F.from(6, 1)));
-    try testing.expect(a.at(1, 1).cmp(.equal, F.from(0, 1)));
-    try testing.expect(a.at(1, 2).cmp(.equal, F.from(5, 1)));
-    try testing.expect(a.at(2, 0).cmp(.equal, F.from(8, 1)));
-    try testing.expect(a.at(2, 1).cmp(.equal, F.from(9, 1)));
-    try testing.expect(a.at(2, 2).cmp(.equal, F.from(7, 1)));
+    try testing.expect(a.at(0, 0).cmp(.eq, F.from(2, 1)));
+    try testing.expect(a.at(0, 1).cmp(.eq, F.from(1, 1)));
+    try testing.expect(a.at(0, 2).cmp(.eq, F.from(3, 1)));
+    try testing.expect(a.at(1, 0).cmp(.eq, F.from(6, 1)));
+    try testing.expect(a.at(1, 1).cmp(.eq, F.from(0, 1)));
+    try testing.expect(a.at(1, 2).cmp(.eq, F.from(5, 1)));
+    try testing.expect(a.at(2, 0).cmp(.eq, F.from(8, 1)));
+    try testing.expect(a.at(2, 1).cmp(.eq, F.from(9, 1)));
+    try testing.expect(a.at(2, 2).cmp(.eq, F.from(7, 1)));
 
     try testing.expectEqual(@as(usize, 3), a.val[0].len);
     try testing.expectEqual(@as(usize, 2), a.val[1].len);
@@ -316,9 +375,9 @@ test "mulpiplication with scalar" {
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
-                try testing.expect(a.at(i, j).cmp(.equal, a_));
+                try testing.expect(a.at(i, j).cmp(.eq, a_));
             } else {
-                try testing.expect(a.at(i, j).cmp(.equal, F.zero));
+                try testing.expect(a.at(i, j).cmp(.eq, F.zero));
             }
         }
     }
@@ -326,9 +385,9 @@ test "mulpiplication with scalar" {
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
-                try testing.expect(a.at(i, j).cmp(.equal, a_.div(a_)));
+                try testing.expect(a.at(i, j).cmp(.eq, a_.div(a_)));
             } else {
-                try testing.expect(a.at(i, j).cmp(.equal, F.zero));
+                try testing.expect(a.at(i, j).cmp(.eq, F.zero));
             }
         }
     }
@@ -354,9 +413,9 @@ test "mulpiplication with vector" {
 
     const av = try a.mulV(v, ally);
     defer av.deinit(ally);
-    try testing.expect(av.at(0).cmp(.equal, F.from(-2, 1)));
-    try testing.expect(av.at(1).cmp(.equal, F.from(1, 1)));
-    try testing.expect(av.at(2).cmp(.equal, F.from(1, 1)));
+    try testing.expect(av.at(0).cmp(.eq, F.from(-2, 1)));
+    try testing.expect(av.at(1).cmp(.eq, F.from(1, 1)));
+    try testing.expect(av.at(2).cmp(.eq, F.from(1, 1)));
 }
 
 test "transpose" {
@@ -383,15 +442,15 @@ test "transpose" {
     var b = try a.transpose(ally);
     defer b.deinit();
 
-    try testing.expect(b.at(0, 0).cmp(.equal, F.from(2, 1)));
-    try testing.expect(b.at(1, 0).cmp(.equal, F.from(1, 1)));
-    try testing.expect(b.at(2, 0).cmp(.equal, F.from(3, 1)));
-    try testing.expect(b.at(0, 1).cmp(.equal, F.from(6, 1)));
-    try testing.expect(b.at(1, 1).cmp(.equal, F.from(0, 1)));
-    try testing.expect(b.at(2, 1).cmp(.equal, F.from(5, 1)));
-    try testing.expect(b.at(0, 2).cmp(.equal, F.from(8, 1)));
-    try testing.expect(b.at(1, 2).cmp(.equal, F.from(9, 1)));
-    try testing.expect(b.at(2, 2).cmp(.equal, F.from(7, 1)));
+    try testing.expect(b.at(0, 0).cmp(.eq, F.from(2, 1)));
+    try testing.expect(b.at(1, 0).cmp(.eq, F.from(1, 1)));
+    try testing.expect(b.at(2, 0).cmp(.eq, F.from(3, 1)));
+    try testing.expect(b.at(0, 1).cmp(.eq, F.from(6, 1)));
+    try testing.expect(b.at(1, 1).cmp(.eq, F.from(0, 1)));
+    try testing.expect(b.at(2, 1).cmp(.eq, F.from(5, 1)));
+    try testing.expect(b.at(0, 2).cmp(.eq, F.from(8, 1)));
+    try testing.expect(b.at(1, 2).cmp(.eq, F.from(9, 1)));
+    try testing.expect(b.at(2, 2).cmp(.eq, F.from(7, 1)));
 }
 
 test "matrix multiplication" {
@@ -425,15 +484,15 @@ test "matrix multiplication" {
     var c = try a.mul(b, ally);
     defer c.deinit();
 
-    try testing.expect(c.at(0, 0).cmp(.equal, F.from(2, 1)));
-    try testing.expect(c.at(0, 1).cmp(.equal, F.from(1, 1)));
-    try testing.expect(c.at(0, 2).cmp(.equal, F.from(6, 1)));
-    try testing.expect(c.at(1, 0).cmp(.equal, F.from(6, 1)));
-    try testing.expect(c.at(1, 1).cmp(.equal, F.from(0, 1)));
-    try testing.expect(c.at(1, 2).cmp(.equal, F.from(11, 1)));
-    try testing.expect(c.at(2, 0).cmp(.equal, F.from(8, 1)));
-    try testing.expect(c.at(2, 1).cmp(.equal, F.from(9, 1)));
-    try testing.expect(c.at(2, 2).cmp(.equal, F.from(24, 1)));
+    try testing.expect(c.at(0, 0).cmp(.eq, F.from(2, 1)));
+    try testing.expect(c.at(0, 1).cmp(.eq, F.from(1, 1)));
+    try testing.expect(c.at(0, 2).cmp(.eq, F.from(6, 1)));
+    try testing.expect(c.at(1, 0).cmp(.eq, F.from(6, 1)));
+    try testing.expect(c.at(1, 1).cmp(.eq, F.from(0, 1)));
+    try testing.expect(c.at(1, 2).cmp(.eq, F.from(11, 1)));
+    try testing.expect(c.at(2, 0).cmp(.eq, F.from(8, 1)));
+    try testing.expect(c.at(2, 1).cmp(.eq, F.from(9, 1)));
+    try testing.expect(c.at(2, 2).cmp(.eq, F.from(24, 1)));
 }
 
 test "LU" {
