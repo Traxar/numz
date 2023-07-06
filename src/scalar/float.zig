@@ -46,6 +46,11 @@ pub fn Float(comptime float: type) type {
             return Scalar{ .f = a.f / b.f };
         }
 
+        /// returns -a
+        pub fn neg(a: Scalar) Scalar {
+            return Scalar{ .f = -a.f };
+        }
+
         /// returns |a|
         pub fn abs(a: Scalar) Scalar {
             return Scalar{ .f = @fabs(a.f) };

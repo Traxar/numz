@@ -63,7 +63,7 @@ pub fn MatrixType(comptime Scalar: type) type {
         pub fn copy(a: Matrix, allocator: Allocator) !Matrix {
             var res = try zero(a.rows, a.cols, allocator);
             for (0..a.rows) |i| {
-                res.val[i] = a.val[i].clone(allocator);
+                res.val[i] = try a.val[i].clone(allocator);
             }
             return res;
         }
@@ -112,10 +112,7 @@ pub fn MatrixType(comptime Scalar: type) type {
 
         /// return element at row and columnIndex
         /// O(1)
-        /// TODO change to not take bool as input, assume existance
         fn valAt(a: Matrix, row: usize, ind: usize, exists: bool) Scalar {
-            assert(row < a.rows);
-            assert(ind <= a.val[row].len);
             if (!exists) {
                 return Scalar.zero;
             } else {
@@ -126,17 +123,12 @@ pub fn MatrixType(comptime Scalar: type) type {
         /// return column at row and columnIndex i
         /// O(1)
         fn colAt(a: Matrix, row: usize, ind: usize) usize {
-            assert(row < a.rows);
-            assert(ind < a.val[row].len);
             return a.val[row].items(.col)[ind];
         }
 
         /// set element at row and columnIndex i
         /// O(1)
         fn setAt(a: Matrix, row: usize, ind: usize, exists: bool, col: usize, b: Scalar) !void {
-            assert(row < a.rows);
-            assert(col < a.cols);
-            assert(ind <= a.val[row].len);
             if (b.cmp(.eq, Scalar.zero)) {
                 if (exists) {
                     a.val[row].orderedRemove(ind);
@@ -235,61 +227,249 @@ pub fn MatrixType(comptime Scalar: type) type {
             return a;
         }
 
+        /// c := a + b
+        /// return c
+        /// O(n*m)
+        pub fn add(a: Matrix, b: Matrix, allocator: Allocator) !Matrix {
+            assert(a.rows == b.rows);
+            assert(a.cols == b.cols);
+            var res = try zero(a.rows, a.cols, allocator);
+            for (0..a.rows) |i| {
+                try res.val[i].ensureTotalCapacity(allocator, a.entAt(i) + b.entAt(i));
+                var j_a: usize = 0;
+                var j_b: usize = 0;
+                while (true) {
+                    const col_a = if (j_a < a.entAt(i)) a.colAt(i, j_a) else a.cols;
+                    const col_b = if (j_b < b.entAt(i)) b.colAt(i, j_b) else b.cols;
+                    if (col_a == col_b) {
+                        if (col_a == a.cols) break;
+                        res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true).add(b.valAt(i, j_b, true)) });
+                        j_a += 1;
+                        j_b += 1;
+                    } else if (col_a < col_b) {
+                        res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
+                        j_a += 1;
+                    } else { //col_b < col_a
+                        res.val[i].appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true) });
+                        j_b += 1;
+                    }
+                }
+                res.val[i].shrinkAndFree(allocator, res.entAt(i));
+            }
+            return res;
+        }
+
+        /// c := a + b
+        /// return c
+        /// O(n*m)
+        pub fn sub(a: Matrix, b: Matrix, allocator: Allocator) !Matrix {
+            assert(a.rows == b.rows);
+            assert(a.cols == b.cols);
+            var res = try zero(a.rows, a.cols, allocator);
+            for (0..a.rows) |i| {
+                try res.val[i].ensureTotalCapacity(allocator, a.entAt(i) + b.entAt(i));
+                var j_a: usize = 0;
+                var j_b: usize = 0;
+                while (true) {
+                    const col_a = if (j_a < a.entAt(i)) a.colAt(i, j_a) else a.cols;
+                    const col_b = if (j_b < b.entAt(i)) b.colAt(i, j_b) else b.cols;
+                    if (col_a == col_b) {
+                        if (col_a == a.cols) break;
+                        res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true).sub(b.valAt(i, j_b, true)) });
+                        j_a += 1;
+                        j_b += 1;
+                    } else if (col_a < col_b) {
+                        res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
+                        j_a += 1;
+                    } else { //col_b < col_a
+                        res.val[i].appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true).neg() });
+                        j_b += 1;
+                    }
+                }
+                res.val[i].shrinkAndFree(allocator, res.entAt(i));
+            }
+            return res;
+        }
+
+        fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_src: usize, nz_col: []IndexSet) !Scalar {
+            var res = Row{};
+            try res.ensureTotalCapacity(a.allocator, a.entAt(row_src) + a.entAt(row_trg));
+
+            const col = a.colAt(row_src, ind_src);
+            const factor = a.at(row_trg, col).div(a.valAt(row_src, ind_src, true)).neg();
+            var i_src: usize = 0;
+            var i_trg: usize = 0;
+            while (true) {
+                const col_src = if (i_src < a.entAt(row_src)) a.colAt(row_src, i_src) else a.cols;
+                const col_trg = if (i_trg < a.entAt(row_trg)) a.colAt(row_trg, i_trg) else a.cols;
+                if (col_src == col_trg) {
+                    if (col_src == a.cols) break;
+                    if (col_src != col) {
+                        const val = a.valAt(row_trg, i_trg, true).add(factor.mul(a.valAt(row_src, i_src, true)));
+                        if (val.cmp(.neq, Scalar.zero)) { //TODO add this check to add and sub
+                            res.appendAssumeCapacity(.{
+                                .col = col_src,
+                                .val = val,
+                            });
+                            try nz_col[col_trg].put(a.allocator, row_trg, undefined);
+                        } else {
+                            _ = nz_col[col_trg].swapRemove(row_trg);
+                        }
+                    }
+                    i_src += 1;
+                    i_trg += 1;
+                } else if (col_src < col_trg) {
+                    res.appendAssumeCapacity(.{ .col = col_src, .val = factor.mul(a.valAt(row_src, i_src, true)) });
+                    try nz_col[col_trg].put(a.allocator, row_trg, undefined);
+                    i_src += 1;
+                } else { //col_b < col_a
+                    res.appendAssumeCapacity(.{ .col = col_trg, .val = a.valAt(row_trg, i_trg, true) });
+                    try nz_col[col_trg].put(a.allocator, row_trg, undefined);
+                    i_trg += 1;
+                }
+            }
+            res.shrinkAndFree(a.allocator, res.len);
+            a.val[row_trg].deinit(a.allocator);
+            a.val[row_trg] = res;
+            return factor.neg();
+        }
+
         const LU = struct {
             //PAQ=LU
             p: Permutation,
             q: Permutation,
-            l: Matrix,
-            q: Matrix,
+            lt: Matrix,
+            u: Matrix,
 
             pub fn deinit(self: LU, allocator: Allocator) void {
                 self.p.deinit(allocator);
                 self.q.deinit(allocator);
-                self.l.deinit(allocator);
-                self.u.deinit(allocator);
+                self.lt.deinit();
+                self.u.deinit();
             }
         };
 
-        pub fn decompLU(a: Matrix, allocator: Allocator) !LU {
-            assert(a.rows == a.cols);
-            const n = a.rows;
+        const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
+        const SortContext = struct {
+            const Self = @This();
+            val: IndexSet.DataList,
+            pub fn lessThan(ctx: Self, a_index: usize, b_index: usize) bool {
+                return ctx.val.items(.key)[a_index] < ctx.val.items(.key)[b_index];
+            }
+        };
+
+        const RowPriority = struct {
+            const Self = @This();
+            nonzeros: usize,
+            norm1: Scalar,
+
+            pub fn from(row: Row) Self {
+                var row_priority = RowPriority{
+                    .nonzeros = row.len,
+                    .norm1 = Scalar.zero,
+                };
+                for (0..row.len) |j| {
+                    row_priority.norm1 = row_priority.norm1.add(row.items(.val)[j]);
+                }
+                return row_priority;
+            }
+
+            pub fn before(self: Self, other: Self) bool {
+                if (self.nonzeros < other.nonzeros) return true;
+                if (self.nonzeros == other.nonzeros and self.norm1.cmp(.gt, other.norm1)) return true;
+                return false;
+            }
+        };
+
+        fn debugprint(self: Matrix) void {
+            std.debug.print("\n", .{});
+            for (0..self.rows) |i| {
+                for (0..self.cols) |j| {
+                    std.debug.print("{}, ", .{self.at(i, j).f});
+                }
+                std.debug.print("\n", .{});
+            }
+        }
+
+        pub fn decompLU(self: Matrix, allocator: Allocator) !LU {
+            assert(self.rows == self.cols);
+            const n = self.rows;
+            var u = try self.copy(allocator);
+            errdefer u.deinit();
+            var lt = try Matrix.zero(n, n, allocator);
+            errdefer lt.deinit();
             // count nonzeros for each column
-            var nz_column = try allocator.alloc(usize, n);
-            defer allocator.free(nz_column);
-            for (0..n) |i| {
-                nz_column[i] = 0;
+            var nz_col = try allocator.alloc(IndexSet, n);
+            defer {
+                for (0..n) |i| {
+                    nz_col[i].deinit(allocator);
+                }
+                allocator.free(nz_col);
             }
             for (0..n) |i| {
-                for (0..a.entAt(i)) |j| {
-                    nz_column[a.colAt(i, j)] += 1;
+                nz_col[i] = IndexSet{};
+            }
+            for (0..n) |i| {
+                for (0..u.entAt(i)) |j| {
+                    try nz_col[u.colAt(i, j)].put(allocator, i, undefined);
                 }
             }
             //initialize the priority queue for row pivoting
-            const RowPriority = struct {
-                const Self = @This();
-                nonzeros: usize,
-                norm1: Scalar,
-
-                pub fn before(self: Self, other: Self) bool {
-                    if (self.nonzeros < other.nonzeros) return true;
-                    if (self.nonzeros == other.nonzeros and self.norm1.cmp(.lt, other.norm1)) return true;
-                    return false;
-                }
-            };
             var row_queue = try PPQ(RowPriority, RowPriority.before).init(n, allocator);
+            errdefer row_queue.deinit(allocator);
             for (0..n) |i| {
-                var row_priority = RowPriority{
-                    .nonzeros = a.entAt(i),
-                    .norm1 = Scalar.zero,
-                };
-                for (0..a.entAt(i)) |j| {
-                    row_priority.norm1 = row_priority.norm1.add(a.valAt(i, j, true));
-                }
-                row_queue.set(i, row_priority);
+                row_queue.set(i, RowPriority.from(u.val[i]));
             }
-            //elimination
+            //main loop
+            for (0..n) |i| {
+                _ = i;
+                //get pivot row
+                const row_pvt = row_queue.remove();
+                if (u.entAt(row_pvt) == 0) return error.NonInvertible;
+                //find pivot column index
+                var ind_pvt: usize = undefined;
+                {
+                    var nz_pvt: usize = n + 1;
+                    var abs_pvt = Scalar.zero;
+                    for (0..u.entAt(row_pvt)) |j| {
+                        const col_j = nz_col[u.colAt(row_pvt, j)].count();
+                        const abs_j = u.valAt(row_pvt, j, true).abs();
+                        if (col_j < nz_pvt or (col_j == nz_pvt and abs_j.cmp(.gt, abs_pvt))) {
+                            nz_pvt = col_j;
+                            abs_pvt = abs_j;
+                            ind_pvt = j;
+                        }
+                    }
+                }
+                const col_pvt = u.colAt(row_pvt, ind_pvt);
+                //elimination
+                try lt.val[row_pvt].ensureTotalCapacity(allocator, nz_col[col_pvt].count());
 
-            return LU{};
+                nz_col[col_pvt].sort(SortContext{ .val = nz_col[col_pvt].entries });
+                var elim_iter = nz_col[col_pvt].iterator();
+                while (elim_iter.next()) |entry| {
+                    const row_trg = entry.key_ptr.*;
+                    if (row_trg == row_pvt) {
+                        lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = Scalar.eye });
+                    }
+                    if (row_trg != row_pvt) {
+                        const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col);
+                        lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = factor });
+                        row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority
+                    }
+                }
+                //remove pivot row form nonzeros
+                for (0..u.entAt(row_pvt)) |j| {
+                    _ = nz_col[u.colAt(row_pvt, j)].swapRemove(row_pvt);
+                }
+            }
+
+            return LU{
+                .p = row_queue.deinitToPermutation(allocator),
+                .q = try Permutation.eye(n, allocator),
+                .lt = lt,
+                .u = u,
+            };
         }
     };
 }
@@ -495,6 +675,102 @@ test "matrix multiplication" {
     try testing.expect(c.at(2, 2).cmp(.eq, F.from(24, 1)));
 }
 
+test "matrix addition and subtraction" {
+    const ally = std.testing.allocator;
+    const F = @import("../scalar.zig").Float(f32);
+    const M = MatrixType(F);
+
+    // 2 0 1   1 0 1   3 0 2
+    // 0 0 5 + 0 1 1 = 0 1 6
+    // 8 9-1   0 0 1   8 9 0
+
+    var a = try M.zero(3, 3, ally);
+    defer a.deinit();
+
+    try a.set(0, 0, F.from(2, 1));
+    try a.set(0, 1, F.zero);
+    try a.set(0, 2, F.from(1, 1));
+    try a.set(1, 0, F.zero);
+    try a.set(1, 1, F.zero);
+    try a.set(1, 2, F.from(5, 1));
+    try a.set(2, 0, F.from(8, 1));
+    try a.set(2, 1, F.from(9, 1));
+    try a.set(2, 2, F.from(-1, 1));
+
+    var b = try M.eye(3, ally);
+    defer b.deinit();
+
+    try b.set(0, 2, F.from(1, 1));
+    try b.set(1, 2, F.from(1, 1));
+
+    var c = try a.add(b, ally);
+    defer c.deinit();
+
+    try testing.expect(c.at(0, 0).cmp(.eq, F.from(3, 1)));
+    try testing.expect(c.at(0, 1).cmp(.eq, F.zero));
+    try testing.expect(c.at(0, 2).cmp(.eq, F.from(2, 1)));
+    try testing.expect(c.at(1, 0).cmp(.eq, F.zero));
+    try testing.expect(c.at(1, 1).cmp(.eq, F.from(1, 1)));
+    try testing.expect(c.at(1, 2).cmp(.eq, F.from(6, 1)));
+    try testing.expect(c.at(2, 0).cmp(.eq, F.from(8, 1)));
+    try testing.expect(c.at(2, 1).cmp(.eq, F.from(9, 1)));
+    try testing.expect(c.at(2, 2).cmp(.eq, F.zero));
+
+    // 2 0 1   1 0 1   1 0 0
+    // 0 0 5 - 0 1 1 = 0-1 4
+    // 8 9-1   0 0 1   8 9-2
+
+    var d = try a.sub(b, ally);
+    defer d.deinit();
+
+    try testing.expect(d.at(0, 0).cmp(.eq, F.from(1, 1)));
+    try testing.expect(d.at(0, 1).cmp(.eq, F.zero));
+    try testing.expect(d.at(0, 2).cmp(.eq, F.zero));
+    try testing.expect(d.at(1, 0).cmp(.eq, F.zero));
+    try testing.expect(d.at(1, 1).cmp(.eq, F.from(-1, 1)));
+    try testing.expect(d.at(1, 2).cmp(.eq, F.from(4, 1)));
+    try testing.expect(d.at(2, 0).cmp(.eq, F.from(8, 1)));
+    try testing.expect(d.at(2, 1).cmp(.eq, F.from(9, 1)));
+    try testing.expect(d.at(2, 2).cmp(.eq, F.from(-2, 1)));
+}
+
 test "LU" {
-    _ = PPQ;
+    const ally = std.testing.allocator;
+    const F = @import("../scalar.zig").Float(f64);
+    const M = MatrixType(F);
+
+    var a = try M.zero(3, 3, ally);
+    defer a.deinit();
+    // 2  1 3    2  1  3    2  1  3
+    // 6  0 5 -> 0 -3 -4 -> 0 -3 -4
+    // 8 10 7    0  6 -5    0  0-13
+
+    try a.set(0, 0, F.from(2, 1));
+    try a.set(0, 1, F.from(1, 1));
+    try a.set(0, 2, F.from(3, 1));
+    try a.set(1, 0, F.from(6, 1));
+    try a.set(1, 1, F.zero);
+    try a.set(1, 2, F.from(5, 1));
+    try a.set(2, 0, F.from(8, 1));
+    try a.set(2, 1, F.from(10, 1));
+    try a.set(2, 2, F.from(7, 1));
+
+    const lu = try a.decompLU(ally);
+    defer lu.deinit(ally);
+
+    const l = try lu.lt.transpose(ally);
+    defer l.deinit();
+
+    const b = try l.mul(lu.u, ally);
+    defer b.deinit();
+
+    try testing.expect(a.at(0, 0).cmp(.eq, b.at(0, 0)));
+    try testing.expect(a.at(0, 1).cmp(.eq, b.at(0, 1)));
+    try testing.expect(a.at(0, 2).cmp(.eq, b.at(0, 2)));
+    try testing.expect(a.at(1, 0).cmp(.eq, b.at(1, 0)));
+    try testing.expect(a.at(1, 1).cmp(.eq, b.at(1, 1)));
+    try testing.expect(a.at(1, 2).cmp(.eq, b.at(1, 2)));
+    try testing.expect(a.at(2, 0).cmp(.eq, b.at(2, 0)));
+    try testing.expect(a.at(2, 1).cmp(.eq, b.at(2, 1)));
+    try testing.expect(a.at(2, 2).cmp(.eq, b.at(2, 2)));
 }
