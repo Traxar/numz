@@ -3,7 +3,7 @@ This is a numerics library written in zig.
 
 ToDo:
 
-    * better test checks for ectors and matrices
+    * better test checks for vectors and matrices
 
 Planned Features:
 
