@@ -1,15 +1,22 @@
 # Num
 This is a numerics library written in zig.
 
+ToDo:
+
+    * better test checks for ectors and matrices
+
 Planned Features:
 
     [x] type of scalars is easily interchangeable.
     [ ] provide truly deterministic decimals.
     [x] Vectors
+        [ ] SIMD support
     [x] Permutations
-    [ ] Sparse matrices: including LU solver
+    [x] Sparse matrices
+        [x] LU solver
     [ ] Meshes
     [ ] PDE toolbox
+    [ ] visualization options, for a start a CLI print
 
 Design Choices:
 

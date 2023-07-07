@@ -5,12 +5,6 @@ const Allocator = std.mem.Allocator;
 const PPQ = @import("utils/permutationPriorityQueue.zig").PermutationPriorityQueue;
 const Permutation = @import("permutation.zig").Permutation;
 
-//TODO:
-// + add
-// + sub
-// + LU
-// + solve
-
 /// return struct that can create new matrices
 /// operations by this struct result in a newly allocated matrix
 pub fn MatrixType(comptime Scalar: type) type {
@@ -45,10 +39,6 @@ pub fn MatrixType(comptime Scalar: type) type {
             }
             return res;
         }
-
-        //TODO: create matrix with 2 vectors
-        //TODO: convert vector to matrix
-        //TODO: convert scalar to matrix
 
         /// deinitialize matrix
         pub fn deinit(a: Matrix) void {
@@ -375,9 +365,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     const row = lu.p.at(i);
                     for (0..lu.lt.entAt(row)) |j| {
                         const col = lu.lt.colAt(row, j);
-                        if (col != row) {
-                            c.set(col, c.at(col).sub(lu.lt.valAt(row, j, true).mul(c.at(row))));
-                        }
+                        c.set(col, c.at(col).sub(lu.lt.valAt(row, j, true).mul(c.at(row))));
                     }
                 }
 
@@ -507,24 +495,20 @@ pub fn MatrixType(comptime Scalar: type) type {
                 q.val[i] = col_pvt;
                 q.inv[col_pvt] = i;
 
+                //remove pivot row form nonzeros
+                for (0..u.entAt(row_pvt)) |j| {
+                    _ = nz_col[u.colAt(row_pvt, j)].swapRemove(row_pvt);
+                }
+
                 //elimination
                 try lt.val[row_pvt].ensureTotalCapacity(allocator, nz_col[col_pvt].count());
                 nz_col[col_pvt].sort(SortContext{ .val = nz_col[col_pvt].entries }); //O(m*log(m)) or O(m^2) ?
                 var elim_iter = nz_col[col_pvt].iterator();
                 while (elim_iter.next()) |entry| { //m
                     const row_trg = entry.key_ptr.*;
-                    if (row_trg == row_pvt) {
-                        lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = Scalar.eye });
-                    }
-                    if (row_trg != row_pvt) {
-                        const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col); //O(m)
-                        lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = factor });
-                        row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority //O(log(n))
-                    }
-                }
-                //remove pivot row form nonzeros
-                for (0..u.entAt(row_pvt)) |j| {
-                    _ = nz_col[u.colAt(row_pvt, j)].swapRemove(row_pvt);
+                    const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col); //O(m)
+                    lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = factor });
+                    row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority //O(log(n))
                 }
             }
 
@@ -798,16 +782,16 @@ test "matrix addition and subtraction" {
     try testing.expect(d.at(2, 2).cmp(.eq, F.from(-2, 1)));
 }
 
-test "LU" {
+test "LU solve" {
     const ally = std.testing.allocator;
     const F = @import("../scalar.zig").Float(f64);
     const M = MatrixType(F);
 
     var a = try M.zero(3, 3, ally);
     defer a.deinit();
-    // 2  1 3    2  1  3    2  1  3
-    // 6  0 5 -> 0 -3 -4 -> 0 -3 -4
-    // 8 10 7    0  6 -5    0  0-13
+    // 2  1 3
+    // 6  0 5
+    // 8 10 7
 
     try a.set(0, 0, F.from(2, 1));
     try a.set(0, 1, F.from(1, 1));
@@ -819,11 +803,33 @@ test "LU" {
     try a.set(2, 1, F.from(10, 1));
     try a.set(2, 2, F.from(7, 1));
 
+    var b = try M.Vector.rep(F.eye, 3, ally);
+    defer b.deinit(ally);
+    b.set(1, F.from(2, 1));
+    b.set(2, F.from(3, 1));
+
+    //decompose
     const lu = try a.decompLU(ally);
     defer lu.deinit(ally);
 
-    const l = try lu.lt.transpose(ally);
+    //solve
+    var x = try lu.solve(b, ally);
+    defer x.deinit(ally);
+
+    //check solve
+    var b_ = try a.mulV(x, ally);
+    defer b_.deinit(ally);
+
+    try testing.expect(b.at(0).cmp(.eq, b_.at(0)));
+    try testing.expect(b.at(1).cmp(.eq, b_.at(1)));
+    try testing.expect(b.at(2).cmp(.eq, b_.at(2)));
+
+    //reconstuct a from LU
+    var l = try lu.lt.transpose(ally);
     defer l.deinit();
+    for (0..3) |i| {
+        try l.set(i, i, F.eye);
+    }
 
     const a_ = try l.mul(lu.u, ally);
     defer a_.deinit();
@@ -837,19 +843,4 @@ test "LU" {
     try testing.expect(a.at(2, 0).cmp(.eq, a_.at(2, 0)));
     try testing.expect(a.at(2, 1).cmp(.eq, a_.at(2, 1)));
     try testing.expect(a.at(2, 2).cmp(.eq, a_.at(2, 2)));
-
-    var b = try M.Vector.rep(F.eye, 3, ally);
-    defer b.deinit(ally);
-    b.set(1, F.from(2, 1));
-    b.set(2, F.from(3, 1));
-
-    var x = try lu.solve(b, ally);
-    defer x.deinit(ally);
-
-    var b_ = try a.mulV(x, ally);
-    defer b_.deinit(ally);
-
-    try testing.expect(b.at(0).cmp(.eq, b_.at(0)));
-    try testing.expect(b.at(1).cmp(.eq, b_.at(1)));
-    try testing.expect(b.at(2).cmp(.eq, b_.at(2)));
 }
