@@ -4,6 +4,8 @@ This is a numerics library written in zig.
 ToDo:
 
     * better test checks for vectors and matrices
+    * 2nd permutation type without inverse
+    * benchmarks 
 
 Planned Features:
 
