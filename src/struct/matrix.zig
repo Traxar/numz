@@ -355,23 +355,50 @@ pub fn MatrixType(comptime Scalar: type) type {
             //PAQ=LU
             p: Permutation,
             q: Permutation,
-            l: Matrix,
+            lt: Matrix,
             u: Matrix,
 
             pub fn deinit(lu: LU, allocator: Allocator) void {
                 lu.p.deinit(allocator);
                 lu.q.deinit(allocator);
-                lu.l.deinit();
+                lu.lt.deinit();
                 lu.u.deinit();
             }
 
             pub fn solve(lu: LU, b: Vector, allocator: Allocator) !Vector {
-                _ = allocator;
-                _ = b;
-                _ = lu;
-                //apply u-1
-                //apply l-1
+                const n = b.len;
 
+                //apply l-1
+                var c = try b.copy(allocator);
+                defer c.deinit(allocator);
+                for (0..n) |i| {
+                    const row = lu.p.at(i);
+                    for (0..lu.lt.entAt(row)) |j| {
+                        const col = lu.lt.colAt(row, j);
+                        if (col != row) {
+                            c.set(col, c.at(col).sub(lu.lt.valAt(row, j, true).mul(c.at(row))));
+                        }
+                    }
+                }
+
+                var x = try Vector.init(n, allocator);
+                //apply u-1
+                for (0..n) |i| {
+                    const row = lu.p.at(n - 1 - i);
+                    const col_diag = lu.q.at(n - 1 - i);
+                    var diag: Scalar = undefined;
+                    var sum = c.at(row);
+                    for (0..lu.u.entAt(row)) |j| {
+                        const col = lu.u.colAt(row, j);
+                        if (col == col_diag) {
+                            diag = lu.u.valAt(row, j, true);
+                        } else {
+                            sum = sum.sub(lu.u.valAt(row, j, true).mul(x.at(col)));
+                        }
+                    }
+                    x.set(col_diag, sum.div(diag));
+                }
+                return x;
             }
         };
 
@@ -427,7 +454,7 @@ pub fn MatrixType(comptime Scalar: type) type {
             var u = try self.copy(allocator);
             errdefer u.deinit();
             var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
-            defer lt.deinit();
+            errdefer lt.deinit();
             var q = try Permutation.init(n, allocator);
             errdefer q.deinit(allocator);
 
@@ -504,7 +531,7 @@ pub fn MatrixType(comptime Scalar: type) type {
             return LU{
                 .p = row_queue.deinitToPermutation(allocator),
                 .q = q,
-                .l = try lt.transpose(allocator), //transposing will not be needed
+                .lt = lt,
                 .u = u,
             };
         }
@@ -795,16 +822,34 @@ test "LU" {
     const lu = try a.decompLU(ally);
     defer lu.deinit(ally);
 
-    const b = try lu.l.mul(lu.u, ally);
-    defer b.deinit();
+    const l = try lu.lt.transpose(ally);
+    defer l.deinit();
 
-    try testing.expect(a.at(0, 0).cmp(.eq, b.at(0, 0)));
-    try testing.expect(a.at(0, 1).cmp(.eq, b.at(0, 1)));
-    try testing.expect(a.at(0, 2).cmp(.eq, b.at(0, 2)));
-    try testing.expect(a.at(1, 0).cmp(.eq, b.at(1, 0)));
-    try testing.expect(a.at(1, 1).cmp(.eq, b.at(1, 1)));
-    try testing.expect(a.at(1, 2).cmp(.eq, b.at(1, 2)));
-    try testing.expect(a.at(2, 0).cmp(.eq, b.at(2, 0)));
-    try testing.expect(a.at(2, 1).cmp(.eq, b.at(2, 1)));
-    try testing.expect(a.at(2, 2).cmp(.eq, b.at(2, 2)));
+    const a_ = try l.mul(lu.u, ally);
+    defer a_.deinit();
+
+    try testing.expect(a.at(0, 0).cmp(.eq, a_.at(0, 0)));
+    try testing.expect(a.at(0, 1).cmp(.eq, a_.at(0, 1)));
+    try testing.expect(a.at(0, 2).cmp(.eq, a_.at(0, 2)));
+    try testing.expect(a.at(1, 0).cmp(.eq, a_.at(1, 0)));
+    try testing.expect(a.at(1, 1).cmp(.eq, a_.at(1, 1)));
+    try testing.expect(a.at(1, 2).cmp(.eq, a_.at(1, 2)));
+    try testing.expect(a.at(2, 0).cmp(.eq, a_.at(2, 0)));
+    try testing.expect(a.at(2, 1).cmp(.eq, a_.at(2, 1)));
+    try testing.expect(a.at(2, 2).cmp(.eq, a_.at(2, 2)));
+
+    var b = try M.Vector.rep(F.eye, 3, ally);
+    defer b.deinit(ally);
+    b.set(1, F.from(2, 1));
+    b.set(2, F.from(3, 1));
+
+    var x = try lu.solve(b, ally);
+    defer x.deinit(ally);
+
+    var b_ = try a.mulV(x, ally);
+    defer b_.deinit(ally);
+
+    try testing.expect(b.at(0).cmp(.eq, b_.at(0)));
+    try testing.expect(b.at(1).cmp(.eq, b_.at(1)));
+    try testing.expect(b.at(2).cmp(.eq, b_.at(2)));
 }

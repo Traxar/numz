@@ -11,7 +11,7 @@ pub const Permutation = struct {
     len: usize,
 
     //initializes Permutation of size n with undefined values
-    fn init(n: usize, allocator: Allocator) !Permutation {
+    pub fn init(n: usize, allocator: Allocator) !Permutation {
         return Permutation{
             .val = (try allocator.alloc(usize, n)).ptr,
             .inv = (try allocator.alloc(usize, n)).ptr,

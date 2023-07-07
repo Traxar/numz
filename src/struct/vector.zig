@@ -12,7 +12,7 @@ pub fn VectorType(comptime Scalar: type) type {
         len: usize,
 
         ///allocate vector with undefined values
-        fn init(n: usize, allocator: Allocator) !Vector {
+        pub fn init(n: usize, allocator: Allocator) !Vector {
             return Vector{
                 .val = (try allocator.alloc(Scalar, n)).ptr,
                 .len = n,
@@ -173,6 +173,13 @@ pub fn VectorType(comptime Scalar: type) type {
                 res = res.max(a.at(i));
             }
             return res;
+        }
+
+        pub fn debugprint(self: Vector) void {
+            std.debug.print("\n", .{});
+            for (0..self.len) |i| {
+                std.debug.print("{}\n", .{self.at(i).f});
+            }
         }
     };
 }
