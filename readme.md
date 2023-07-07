@@ -1,4 +1,4 @@
-# Numz
+# numz
 This is a numerics library written in zig.
 
 ToDo:
