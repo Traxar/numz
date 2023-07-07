@@ -73,9 +73,22 @@ pub fn MatrixType(comptime Scalar: type) type {
         /// O(m*n)
         pub fn transpose(a: Matrix, allocator: Allocator) !Matrix {
             var res = try zero(a.cols, a.rows, allocator);
+            var nz_col = try allocator.alloc(usize, a.cols);
+            defer allocator.free(nz_col);
+            for (0..a.cols) |j| {
+                nz_col[j] = 0;
+            }
             for (0..a.rows) |i| {
                 for (0..a.entAt(i)) |j| {
-                    try res.set(a.colAt(i, j), i, a.valAt(i, j, true));
+                    nz_col[a.colAt(i, j)] += 1;
+                }
+            }
+            for (0..a.cols) |j| {
+                try res.val[j].ensureTotalCapacity(allocator, nz_col[j]);
+            }
+            for (0..a.rows) |i| {
+                for (0..a.entAt(i)) |j| {
+                    res.val[a.colAt(i, j)].appendAssumeCapacity(.{ .col = i, .val = a.valAt(i, j, true) });
                 }
             }
             return res;
@@ -291,27 +304,30 @@ pub fn MatrixType(comptime Scalar: type) type {
             return res;
         }
 
-        fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_src: usize, nz_col: []IndexSet) !Scalar {
+        fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_pvt: usize, nz_col: []IndexSet) !Scalar {
+            //allocate result
             var res = Row{};
             try res.ensureTotalCapacity(a.allocator, a.entAt(row_src) + a.entAt(row_trg));
 
-            const col = a.colAt(row_src, ind_src);
-            const factor = a.at(row_trg, col).div(a.valAt(row_src, ind_src, true)).neg();
+            //get factor for elimination
+            const col_pvt = a.colAt(row_src, ind_pvt);
+            const factor = a.at(row_trg, col_pvt).div(a.valAt(row_src, ind_pvt, true)).neg();
+
+            //main loop
             var i_src: usize = 0;
             var i_trg: usize = 0;
             while (true) {
                 const col_src = if (i_src < a.entAt(row_src)) a.colAt(row_src, i_src) else a.cols;
                 const col_trg = if (i_trg < a.entAt(row_trg)) a.colAt(row_trg, i_trg) else a.cols;
                 if (col_src == col_trg) {
-                    if (col_src == a.cols) break;
-                    if (col_src != col) {
+                    if (col_src == a.cols) break; //end
+                    if (col_src != col_pvt) { //skip at pivot column
                         const val = a.valAt(row_trg, i_trg, true).add(factor.mul(a.valAt(row_src, i_src, true)));
                         if (val.cmp(.neq, Scalar.zero)) { //TODO add this check to add and sub
                             res.appendAssumeCapacity(.{
                                 .col = col_src,
                                 .val = val,
                             });
-                            try nz_col[col_trg].put(a.allocator, row_trg, undefined);
                         } else {
                             _ = nz_col[col_trg].swapRemove(row_trg);
                         }
@@ -324,11 +340,12 @@ pub fn MatrixType(comptime Scalar: type) type {
                     i_src += 1;
                 } else { //col_b < col_a
                     res.appendAssumeCapacity(.{ .col = col_trg, .val = a.valAt(row_trg, i_trg, true) });
-                    try nz_col[col_trg].put(a.allocator, row_trg, undefined);
                     i_trg += 1;
                 }
             }
             res.shrinkAndFree(a.allocator, res.len);
+
+            //replace row
             a.val[row_trg].deinit(a.allocator);
             a.val[row_trg] = res;
             return factor.neg();
@@ -338,18 +355,38 @@ pub fn MatrixType(comptime Scalar: type) type {
             //PAQ=LU
             p: Permutation,
             q: Permutation,
-            lt: Matrix,
+            l: Matrix,
             u: Matrix,
 
-            pub fn deinit(self: LU, allocator: Allocator) void {
-                self.p.deinit(allocator);
-                self.q.deinit(allocator);
-                self.lt.deinit();
-                self.u.deinit();
+            pub fn deinit(lu: LU, allocator: Allocator) void {
+                lu.p.deinit(allocator);
+                lu.q.deinit(allocator);
+                lu.l.deinit();
+                lu.u.deinit();
+            }
+
+            pub fn solve(lu: LU, b: Vector, allocator: Allocator) !Vector {
+                _ = allocator;
+                _ = b;
+                _ = lu;
+                //apply u-1
+                //apply l-1
+
             }
         };
 
+        fn debugprint(self: Matrix) void {
+            std.debug.print("\n", .{});
+            for (0..self.rows) |i| {
+                for (0..self.cols) |j| {
+                    std.debug.print("{}, ", .{self.at(i, j).f});
+                }
+                std.debug.print("\n", .{});
+            }
+        }
+
         const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
+
         const SortContext = struct {
             const Self = @This();
             val: IndexSet.DataList,
@@ -381,24 +418,20 @@ pub fn MatrixType(comptime Scalar: type) type {
             }
         };
 
-        fn debugprint(self: Matrix) void {
-            std.debug.print("\n", .{});
-            for (0..self.rows) |i| {
-                for (0..self.cols) |j| {
-                    std.debug.print("{}, ", .{self.at(i, j).f});
-                }
-                std.debug.print("\n", .{});
-            }
-        }
-
+        /// O(n*m*(m+log(n)))
         pub fn decompLU(self: Matrix, allocator: Allocator) !LU {
             assert(self.rows == self.cols);
             const n = self.rows;
+
+            //allocating result structs
             var u = try self.copy(allocator);
             errdefer u.deinit();
-            var lt = try Matrix.zero(n, n, allocator);
-            errdefer lt.deinit();
-            // count nonzeros for each column
+            var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
+            defer lt.deinit();
+            var q = try Permutation.init(n, allocator);
+            errdefer q.deinit(allocator);
+
+            // count nonzeros for each column O(n*m)
             var nz_col = try allocator.alloc(IndexSet, n);
             defer {
                 for (0..n) |i| {
@@ -409,29 +442,31 @@ pub fn MatrixType(comptime Scalar: type) type {
             for (0..n) |i| {
                 nz_col[i] = IndexSet{};
             }
-            for (0..n) |i| {
-                for (0..u.entAt(i)) |j| {
-                    try nz_col[u.colAt(i, j)].put(allocator, i, undefined);
+            for (0..n) |i| { //n
+                for (0..u.entAt(i)) |j| { //m
+                    try nz_col[u.colAt(i, j)].put(allocator, i, undefined); //O(1)
                 }
             }
+
             //initialize the priority queue for row pivoting
             var row_queue = try PPQ(RowPriority, RowPriority.before).init(n, allocator);
             errdefer row_queue.deinit(allocator);
-            for (0..n) |i| {
-                row_queue.set(i, RowPriority.from(u.val[i]));
+            for (0..n) |i| { //n
+                row_queue.set(i, RowPriority.from(u.val[i])); //O(log(n)+m)
             }
+
             //main loop
-            for (0..n) |i| {
-                _ = i;
-                //get pivot row
-                const row_pvt = row_queue.remove();
+            for (0..n) |i| { //n
+                //get pivot row from queue
+                const row_pvt = row_queue.remove(); //O(log(n))
                 if (u.entAt(row_pvt) == 0) return error.NonInvertible;
-                //find pivot column index
+
+                //find pivot column O(m)
                 var ind_pvt: usize = undefined;
                 {
-                    var nz_pvt: usize = n + 1;
+                    var nz_pvt: usize = n;
                     var abs_pvt = Scalar.zero;
-                    for (0..u.entAt(row_pvt)) |j| {
+                    for (0..u.entAt(row_pvt)) |j| { //m
                         const col_j = nz_col[u.colAt(row_pvt, j)].count();
                         const abs_j = u.valAt(row_pvt, j, true).abs();
                         if (col_j < nz_pvt or (col_j == nz_pvt and abs_j.cmp(.gt, abs_pvt))) {
@@ -442,20 +477,22 @@ pub fn MatrixType(comptime Scalar: type) type {
                     }
                 }
                 const col_pvt = u.colAt(row_pvt, ind_pvt);
+                q.val[i] = col_pvt;
+                q.inv[col_pvt] = i;
+
                 //elimination
                 try lt.val[row_pvt].ensureTotalCapacity(allocator, nz_col[col_pvt].count());
-
-                nz_col[col_pvt].sort(SortContext{ .val = nz_col[col_pvt].entries });
+                nz_col[col_pvt].sort(SortContext{ .val = nz_col[col_pvt].entries }); //O(m*log(m)) or O(m^2) ?
                 var elim_iter = nz_col[col_pvt].iterator();
-                while (elim_iter.next()) |entry| {
+                while (elim_iter.next()) |entry| { //m
                     const row_trg = entry.key_ptr.*;
                     if (row_trg == row_pvt) {
                         lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = Scalar.eye });
                     }
                     if (row_trg != row_pvt) {
-                        const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col);
+                        const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col); //O(m)
                         lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = factor });
-                        row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority
+                        row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority //O(log(n))
                     }
                 }
                 //remove pivot row form nonzeros
@@ -466,8 +503,8 @@ pub fn MatrixType(comptime Scalar: type) type {
 
             return LU{
                 .p = row_queue.deinitToPermutation(allocator),
-                .q = try Permutation.eye(n, allocator),
-                .lt = lt,
+                .q = q,
+                .l = try lt.transpose(allocator), //transposing will not be needed
                 .u = u,
             };
         }
@@ -758,10 +795,7 @@ test "LU" {
     const lu = try a.decompLU(ally);
     defer lu.deinit(ally);
 
-    const l = try lu.lt.transpose(ally);
-    defer l.deinit();
-
-    const b = try l.mul(lu.u, ally);
+    const b = try lu.l.mul(lu.u, ally);
     defer b.deinit();
 
     try testing.expect(a.at(0, 0).cmp(.eq, b.at(0, 0)));
