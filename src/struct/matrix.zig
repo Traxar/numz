@@ -246,7 +246,13 @@ pub fn MatrixType(comptime Scalar: type) type {
                     const col_b = if (j_b < b.entAt(i)) b.colAt(i, j_b) else b.cols;
                     if (col_a == col_b) {
                         if (col_a == a.cols) break;
-                        res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true).add(b.valAt(i, j_b, true)) });
+                        const val = a.valAt(i, j_a, true).add(b.valAt(i, j_b, true));
+                        if (val.cmp(.neq, Scalar.zero)) {
+                            res.val[i].appendAssumeCapacity(.{
+                                .col = col_a,
+                                .val = val,
+                            });
+                        }
                         j_a += 1;
                         j_b += 1;
                     } else if (col_a < col_b) {
@@ -278,7 +284,13 @@ pub fn MatrixType(comptime Scalar: type) type {
                     const col_b = if (j_b < b.entAt(i)) b.colAt(i, j_b) else b.cols;
                     if (col_a == col_b) {
                         if (col_a == a.cols) break;
-                        res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true).sub(b.valAt(i, j_b, true)) });
+                        const val = a.valAt(i, j_a, true).sub(b.valAt(i, j_b, true));
+                        if (val.cmp(.neq, Scalar.zero)) {
+                            res.val[i].appendAssumeCapacity(.{
+                                .col = col_a,
+                                .val = val,
+                            });
+                        }
                         j_a += 1;
                         j_b += 1;
                     } else if (col_a < col_b) {
@@ -297,7 +309,7 @@ pub fn MatrixType(comptime Scalar: type) type {
         fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_pvt: usize, nz_col: []IndexSet) !Scalar {
             //allocate result
             var res = Row{};
-            try res.ensureTotalCapacity(a.allocator, a.entAt(row_src) + a.entAt(row_trg));
+            try res.ensureTotalCapacity(a.allocator, a.entAt(row_src) + a.entAt(row_trg) - 1);
 
             //get factor for elimination
             const col_pvt = a.colAt(row_src, ind_pvt);
@@ -313,7 +325,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     if (col_src == a.cols) break; //end
                     if (col_src != col_pvt) { //skip at pivot column
                         const val = a.valAt(row_trg, i_trg, true).add(factor.mul(a.valAt(row_src, i_src, true)));
-                        if (val.cmp(.neq, Scalar.zero)) { //TODO add this check to add and sub
+                        if (val.cmp(.neq, Scalar.zero)) {
                             res.appendAssumeCapacity(.{
                                 .col = col_src,
                                 .val = val,
