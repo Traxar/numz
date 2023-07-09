@@ -355,14 +355,15 @@ pub fn MatrixType(comptime Scalar: type) type {
 
         const LU = struct {
             //PAQ=LU
-            p: Permutation,
-            q: Permutation,
+            p: [*]usize,
+            q: [*]usize,
             lt: Matrix,
             u: Matrix,
 
             pub fn deinit(lu: LU, allocator: Allocator) void {
-                lu.p.deinit(allocator);
-                lu.q.deinit(allocator);
+                const n = lu.u.rows;
+                allocator.free(lu.p[0..n]);
+                allocator.free(lu.q[0..n]);
                 lu.lt.deinit();
                 lu.u.deinit();
             }
@@ -374,7 +375,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                 var c = try b.copy(allocator);
                 defer c.deinit(allocator);
                 for (0..n) |i| {
-                    const row = lu.p.at(i);
+                    const row = lu.p[i];
                     for (0..lu.lt.entAt(row)) |j| {
                         const col = lu.lt.colAt(row, j);
                         c.set(col, c.at(col).sub(lu.lt.valAt(row, j, true).mul(c.at(row))));
@@ -384,8 +385,8 @@ pub fn MatrixType(comptime Scalar: type) type {
                 var x = try Vector.init(n, allocator);
                 //apply u-1
                 for (0..n) |i| {
-                    const row = lu.p.at(n - 1 - i);
-                    const col_diag = lu.q.at(n - 1 - i);
+                    const row = lu.p[n - 1 - i];
+                    const col_diag = lu.q[n - 1 - i];
                     var diag: Scalar = undefined;
                     var sum = c.at(row);
                     for (0..lu.u.entAt(row)) |j| {
@@ -455,8 +456,8 @@ pub fn MatrixType(comptime Scalar: type) type {
             errdefer u.deinit();
             var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
             errdefer lt.deinit();
-            var q = try Permutation.init(n, allocator);
-            errdefer q.deinit(allocator);
+            var q = try allocator.alloc(usize, n);
+            errdefer allocator.free(q);
 
             // count nonzeros for each column O(n*m)
             var nz_col = try allocator.alloc(IndexSet, n);
@@ -504,8 +505,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     }
                 }
                 const col_pvt = u.colAt(row_pvt, ind_pvt);
-                q.val[i] = col_pvt;
-                q.inv[col_pvt] = i;
+                q[i] = col_pvt;
 
                 //remove pivot row form nonzeros
                 for (0..u.entAt(row_pvt)) |j| {
@@ -523,10 +523,12 @@ pub fn MatrixType(comptime Scalar: type) type {
                     row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority //O(log(n))
                 }
             }
+            const p = row_queue.deinitToPermutation(allocator);
+            allocator.free(p.inv[0..n]);
 
             return LU{
-                .p = row_queue.deinitToPermutation(allocator),
-                .q = q,
+                .p = p.val,
+                .q = q.ptr,
                 .lt = lt,
                 .u = u,
             };
