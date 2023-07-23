@@ -3,6 +3,7 @@ This is a numerics library written in zig.
 
 ToDo:
 
+    * improve comments and doc comments
     * better test checks for vectors and matrices
     * 2nd permutation type without inverse
     * benchmarks 

@@ -368,6 +368,15 @@ pub fn MatrixType(comptime Scalar: type) type {
                 lu.u.deinit();
             }
 
+            pub fn det(lu: LU) Scalar {
+                var res = Scalar.eye;
+                const n = lu.u.rows;
+                for (0..n) |i| {
+                    res = res.mul(lu.u.at(lu.p[i], lu.q[i]));
+                }
+                return res;
+            }
+
             pub fn solve(lu: LU, b: Vector, allocator: Allocator) !Vector {
                 const n = b.len;
 
@@ -806,6 +815,7 @@ test "LU solve" {
     // 2  1 3
     // 6  0 5
     // 8 10 7
+    // det = 40+180-100-42 = 78
 
     try a.set(0, 0, F.from(2, 1));
     try a.set(0, 1, F.from(1, 1));
@@ -837,6 +847,9 @@ test "LU solve" {
     try testing.expect(b.at(0).cmp(.eq, b_.at(0)));
     try testing.expect(b.at(1).cmp(.eq, b_.at(1)));
     try testing.expect(b.at(2).cmp(.eq, b_.at(2)));
+
+    //check det
+    try testing.expect(F.from(78, 1).cmp(.eq, lu.det()));
 
     //reconstuct a from LU
     var l = try lu.lt.transpose(ally);
