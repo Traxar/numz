@@ -4,20 +4,25 @@ const assert = std.debug.assert;
 const CompareOperator = std.math.CompareOperator;
 const Allocator = std.mem.Allocator;
 
+/// scalar data structure for computation
+/// choose `float` from `{f16, f32, f64, f80, f128}`
 pub fn Float(comptime float: type) type {
-    return SIMDFloat(float, 1);
+    return SIMDFloat(1, float);
 }
 
-/// wrapper for the float datastructure
-/// choose float from {f16,f32,f64,f80,f128}
-pub fn SIMDFloat(comptime float: type, comptime n: comptime_int) type {
+/// scalar data structure for SIMD computation
+/// choose `float` from `{f16, f32, f64, f80, f128}`
+/// `size` determines the SIMD size. if `size` is set to `null` the SIMD size will be choosen based on an heuristic
+pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
+    assert(size != 0);
     return struct {
         const Scalar = @This();
-        const len = if (n <= 0) std.simd.suggestVectorSize(float) else n;
-        f: @Vector(len, float),
+        const SIMDsize: usize = size orelse (std.simd.suggestVectorSize(float) orelse 1);
+        f: @Vector(SIMDsize, float),
 
-        pub fn SIMDType(comptime length: ?comptime_int) type {
-            return SIMDFloat(float, length);
+        /// return a SIMD version of `@This()` with SIMD size `size_`
+        pub fn SIMDType(comptime size_: ?comptime_int) type {
+            return SIMDFloat(float, size_);
         }
 
         /// the 0 element
@@ -64,18 +69,18 @@ pub fn SIMDFloat(comptime float: type, comptime n: comptime_int) type {
 
         /// returns |√a|
         pub inline fn sqrt(a: Scalar) Scalar {
-            assert(@reduce(.And, a.cmp(.gte, Scalar.zero)));
+            assert(a.cmp(.gte, Scalar.zero));
             return Scalar{ .f = @sqrt(a.f) };
         }
 
         /// return log2(a)
         pub inline fn log2(a: Scalar) Scalar {
-            assert(@reduce(.And, a.cmp(.gt, Scalar.zero)));
+            assert(a.cmp(.gt, Scalar.zero));
             return Scalar{ .f = @log2(a.f) };
         }
 
         /// returns truth value of: a r b
-        pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(len, bool) {
+        pub inline fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
             return switch (r) {
                 .eq => a.f == b.f,
                 .lt => a.f < b.f,
@@ -86,8 +91,8 @@ pub fn SIMDFloat(comptime float: type, comptime n: comptime_int) type {
             };
         }
 
-        pub inline fn cmpAll(a: Scalar, r: CompareOperator, b: Scalar) bool {
-            return @reduce(.And, a.cmp(r, b));
+        pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
+            return @reduce(.And, a.SIMDcmp(r, b));
         }
 
         ///returns the minimum of a and b
@@ -102,7 +107,7 @@ pub fn SIMDFloat(comptime float: type, comptime n: comptime_int) type {
     };
 }
 
-test "creation" {
+test "float creation" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
@@ -114,7 +119,7 @@ test "creation" {
     }
 }
 
-test "operators" {
+test "float operators" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
@@ -138,31 +143,42 @@ test "operators" {
     }
 }
 
-test "comparisons" {
+test "float comparisons" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
         const a = F.from(-314, 100);
         const b = F.from(527, 100);
-        try testing.expect(a.cmpAll(.lt, b));
-        try testing.expect(a.cmpAll(.lte, b));
-        try testing.expect(!a.cmpAll(.eq, b));
-        try testing.expect(!a.cmpAll(.gte, b));
-        try testing.expect(!a.cmpAll(.gt, b));
-        try testing.expect(a.cmpAll(.neq, b));
+        try testing.expect(a.cmp(.lt, b));
+        try testing.expect(a.cmp(.lte, b));
+        try testing.expect(!a.cmp(.eq, b));
+        try testing.expect(!a.cmp(.gte, b));
+        try testing.expect(!a.cmp(.gt, b));
+        try testing.expect(a.cmp(.neq, b));
 
-        try testing.expect(!b.cmpAll(.lt, a));
-        try testing.expect(!b.cmpAll(.lte, a));
-        try testing.expect(!b.cmpAll(.eq, a));
-        try testing.expect(b.cmpAll(.gte, a));
-        try testing.expect(b.cmpAll(.gt, a));
-        try testing.expect(b.cmpAll(.neq, a));
+        try testing.expect(!b.cmp(.lt, a));
+        try testing.expect(!b.cmp(.lte, a));
+        try testing.expect(!b.cmp(.eq, a));
+        try testing.expect(b.cmp(.gte, a));
+        try testing.expect(b.cmp(.gt, a));
+        try testing.expect(b.cmp(.neq, a));
 
-        try testing.expect(!a.cmpAll(.lt, a));
-        try testing.expect(a.cmpAll(.lte, a));
-        try testing.expect(a.cmpAll(.eq, a));
-        try testing.expect(a.cmpAll(.gte, a));
-        try testing.expect(!a.cmpAll(.gt, a));
-        try testing.expect(!a.cmpAll(.neq, a));
+        try testing.expect(!a.cmp(.lt, a));
+        try testing.expect(a.cmp(.lte, a));
+        try testing.expect(a.cmp(.eq, a));
+        try testing.expect(a.cmp(.gte, a));
+        try testing.expect(!a.cmp(.gt, a));
+        try testing.expect(!a.cmp(.neq, a));
+    }
+}
+
+test "float SIMD" {
+    const fTypes = [_]type{ f16, f32, f64, f80, f128 };
+    inline for (fTypes) |f| {
+        const F = SIMDFloat(null, f);
+        const a = F.from(-314, 100);
+        const b = F.from(527, 100);
+        const c = F{ .f = a.f + b.f };
+        try testing.expect(c.cmp(.eq, a.add(b)));
     }
 }

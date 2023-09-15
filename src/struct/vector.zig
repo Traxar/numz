@@ -196,7 +196,7 @@ test "creation" {
 
     try testing.expectEqual(@as(usize, n), v.len);
     for (0..n) |i| {
-        try testing.expect(a.cmp(.eq, v.at(i))[0]);
+        try testing.expect(a.SIMDcmp(.eq, v.at(i))[0]);
     }
 }
 
@@ -215,39 +215,39 @@ test "operators" {
     defer b.deinit(ally);
     b.set(0, F.eye);
 
-    try testing.expect(a.at(1).cmpAll(.eq, F.zero));
+    try testing.expect(a.at(1).cmp(.eq, F.zero));
 
     const c = (try a.copy(ally)).add(b);
     defer c.deinit(ally);
-    try testing.expect(c.at(0).cmpAll(.eq, a_.add(F.eye)));
-    try testing.expect(c.at(1).cmpAll(.eq, b_));
-    try testing.expect(c.at(2).cmpAll(.eq, a_.add(b_)));
+    try testing.expect(c.at(0).cmp(.eq, a_.add(F.eye)));
+    try testing.expect(c.at(1).cmp(.eq, b_));
+    try testing.expect(c.at(2).cmp(.eq, a_.add(b_)));
 
     const d = (try a.copy(ally)).add(b);
     defer d.deinit(ally);
-    try testing.expect(d.at(0).cmpAll(.eq, a_.add(F.eye)));
-    try testing.expect(d.at(1).cmpAll(.eq, b_));
-    try testing.expect(d.at(2).cmpAll(.eq, a_.add(b_)));
+    try testing.expect(d.at(0).cmp(.eq, a_.add(F.eye)));
+    try testing.expect(d.at(1).cmp(.eq, b_));
+    try testing.expect(d.at(2).cmp(.eq, a_.add(b_)));
 
     const e = (try a.copy(ally)).mul(b);
     defer e.deinit(ally);
-    try testing.expect(e.at(0).cmpAll(.eq, a_));
-    try testing.expect(e.at(1).cmpAll(.eq, F.zero));
-    try testing.expect(e.at(2).cmpAll(.eq, a_.mul(b_)));
+    try testing.expect(e.at(0).cmp(.eq, a_));
+    try testing.expect(e.at(1).cmp(.eq, F.zero));
+    try testing.expect(e.at(2).cmp(.eq, a_.mul(b_)));
 
     const f = (try a.copy(ally)).div(b);
     defer f.deinit(ally);
-    try testing.expect(f.at(0).cmpAll(.eq, a_));
-    try testing.expect(f.at(1).cmpAll(.eq, F.zero));
-    try testing.expect(f.at(2).cmpAll(.eq, a_.div(b_)));
+    try testing.expect(f.at(0).cmp(.eq, a_));
+    try testing.expect(f.at(1).cmp(.eq, F.zero));
+    try testing.expect(f.at(2).cmp(.eq, a_.div(b_)));
 
-    try testing.expect(a.dot(b).cmpAll(.eq, a_.add(a_.mul(b_))));
+    try testing.expect(a.dot(b).cmp(.eq, a_.add(a_.mul(b_))));
 
-    try testing.expect(b.sum().cmpAll(.eq, b_.add(b_).add(F.eye)));
+    try testing.expect(b.sum().cmp(.eq, b_.add(b_).add(F.eye)));
 
     const a_2 = a_.mul(a_);
-    try testing.expect(a.norm().cmpAll(.eq, a_2.add(a_2).sqrt()));
+    try testing.expect(a.norm().cmp(.eq, a_2.add(a_2).sqrt()));
 
-    try testing.expect(a.min().cmpAll(.eq, a_.min(F.zero)));
-    try testing.expect(b.max().cmpAll(.eq, b_.max(F.eye)));
+    try testing.expect(a.min().cmp(.eq, a_.min(F.zero)));
+    try testing.expect(b.max().cmp(.eq, b_.max(F.eye)));
 }
