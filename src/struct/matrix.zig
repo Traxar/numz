@@ -132,7 +132,7 @@ pub fn MatrixType(comptime Scalar: type) type {
         /// set element at row and columnIndex i
         /// O(1)
         fn setAt(a: Matrix, row: usize, ind: usize, exists: bool, col: usize, b: Scalar) !void {
-            if (b.cmp(.eq, Scalar.zero)) {
+            if (b.cmpAll(.eq, Scalar.zero)) {
                 if (exists) {
                     a.val[row].orderedRemove(ind);
                 } // else do nothing
@@ -247,7 +247,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     if (col_a == col_b) {
                         if (col_a == a.cols) break;
                         const val = a.valAt(i, j_a, true).add(b.valAt(i, j_b, true));
-                        if (val.cmp(.neq, Scalar.zero)) {
+                        if (val.cmpAll(.neq, Scalar.zero)) {
                             res.val[i].appendAssumeCapacity(.{
                                 .col = col_a,
                                 .val = val,
@@ -285,7 +285,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     if (col_a == col_b) {
                         if (col_a == a.cols) break;
                         const val = a.valAt(i, j_a, true).sub(b.valAt(i, j_b, true));
-                        if (val.cmp(.neq, Scalar.zero)) {
+                        if (val.cmpAll(.neq, Scalar.zero)) {
                             res.val[i].appendAssumeCapacity(.{
                                 .col = col_a,
                                 .val = val,
@@ -325,7 +325,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     if (col_src == a.cols) break; //end
                     if (col_src != col_pvt) { //skip at pivot column
                         const val = a.valAt(row_trg, i_trg, true).add(factor.mul(a.valAt(row_src, i_src, true)));
-                        if (val.cmp(.neq, Scalar.zero)) {
+                        if (val.cmpAll(.neq, Scalar.zero)) {
                             res.appendAssumeCapacity(.{
                                 .col = col_src,
                                 .val = val,
@@ -450,7 +450,7 @@ pub fn MatrixType(comptime Scalar: type) type {
 
             pub fn before(self: Self, other: Self) bool {
                 if (self.nonzeros < other.nonzeros) return true;
-                if (self.nonzeros == other.nonzeros and self.norm1.cmp(.gt, other.norm1)) return true;
+                if (self.nonzeros == other.nonzeros and self.norm1.cmpAll(.gt, other.norm1)) return true;
                 return false;
             }
         };
@@ -506,7 +506,7 @@ pub fn MatrixType(comptime Scalar: type) type {
                     for (0..u.entAt(row_pvt)) |j| { //m
                         const col_j = nz_col[u.colAt(row_pvt, j)].count();
                         const abs_j = u.valAt(row_pvt, j, true).abs();
-                        if (col_j < nz_pvt or (col_j == nz_pvt and abs_j.cmp(.gt, abs_pvt))) {
+                        if (col_j < nz_pvt or (col_j == nz_pvt and abs_j.cmpAll(.gt, abs_pvt))) {
                             nz_pvt = col_j;
                             abs_pvt = abs_j;
                             ind_pvt = j;
@@ -556,7 +556,7 @@ test "creation" {
     defer a.deinit();
     for (0..n) |i| {
         for (0..m) |j| {
-            try testing.expect(a.at(i, j).cmp(.eq, F.zero));
+            try testing.expect(a.at(i, j).cmpAll(.eq, F.zero));
         }
     }
 
@@ -565,9 +565,9 @@ test "creation" {
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
-                try testing.expect(b.at(i, j).cmp(.eq, F.eye));
+                try testing.expect(b.at(i, j).cmpAll(.eq, F.eye));
             } else {
-                try testing.expect(b.at(i, j).cmp(.eq, F.zero));
+                try testing.expect(b.at(i, j).cmpAll(.eq, F.zero));
             }
         }
     }
@@ -594,15 +594,15 @@ test "removing entries" {
     try a.set(2, 0, F.from(8, 1));
     try a.set(2, 1, F.from(9, 1));
 
-    try testing.expect(a.at(0, 0).cmp(.eq, F.from(2, 1)));
-    try testing.expect(a.at(0, 1).cmp(.eq, F.from(1, 1)));
-    try testing.expect(a.at(0, 2).cmp(.eq, F.from(3, 1)));
-    try testing.expect(a.at(1, 0).cmp(.eq, F.from(6, 1)));
-    try testing.expect(a.at(1, 1).cmp(.eq, F.from(0, 1)));
-    try testing.expect(a.at(1, 2).cmp(.eq, F.from(5, 1)));
-    try testing.expect(a.at(2, 0).cmp(.eq, F.from(8, 1)));
-    try testing.expect(a.at(2, 1).cmp(.eq, F.from(9, 1)));
-    try testing.expect(a.at(2, 2).cmp(.eq, F.from(7, 1)));
+    try testing.expect(a.at(0, 0).cmpAll(.eq, F.from(2, 1)));
+    try testing.expect(a.at(0, 1).cmpAll(.eq, F.from(1, 1)));
+    try testing.expect(a.at(0, 2).cmpAll(.eq, F.from(3, 1)));
+    try testing.expect(a.at(1, 0).cmpAll(.eq, F.from(6, 1)));
+    try testing.expect(a.at(1, 1).cmpAll(.eq, F.from(0, 1)));
+    try testing.expect(a.at(1, 2).cmpAll(.eq, F.from(5, 1)));
+    try testing.expect(a.at(2, 0).cmpAll(.eq, F.from(8, 1)));
+    try testing.expect(a.at(2, 1).cmpAll(.eq, F.from(9, 1)));
+    try testing.expect(a.at(2, 2).cmpAll(.eq, F.from(7, 1)));
 
     try testing.expectEqual(@as(usize, 3), a.val[0].len);
     try testing.expectEqual(@as(usize, 2), a.val[1].len);
@@ -626,9 +626,9 @@ test "mulpiplication with scalar" {
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
-                try testing.expect(a.at(i, j).cmp(.eq, a_));
+                try testing.expect(a.at(i, j).cmpAll(.eq, a_));
             } else {
-                try testing.expect(a.at(i, j).cmp(.eq, F.zero));
+                try testing.expect(a.at(i, j).cmpAll(.eq, F.zero));
             }
         }
     }
@@ -636,9 +636,9 @@ test "mulpiplication with scalar" {
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
-                try testing.expect(a.at(i, j).cmp(.eq, a_.div(a_)));
+                try testing.expect(a.at(i, j).cmpAll(.eq, a_.div(a_)));
             } else {
-                try testing.expect(a.at(i, j).cmp(.eq, F.zero));
+                try testing.expect(a.at(i, j).cmpAll(.eq, F.zero));
             }
         }
     }
@@ -664,9 +664,9 @@ test "mulpiplication with vector" {
 
     const av = try a.mulV(v, ally);
     defer av.deinit(ally);
-    try testing.expect(av.at(0).cmp(.eq, F.from(-2, 1)));
-    try testing.expect(av.at(1).cmp(.eq, F.from(1, 1)));
-    try testing.expect(av.at(2).cmp(.eq, F.from(1, 1)));
+    try testing.expect(av.at(0).cmpAll(.eq, F.from(-2, 1)));
+    try testing.expect(av.at(1).cmpAll(.eq, F.from(1, 1)));
+    try testing.expect(av.at(2).cmpAll(.eq, F.from(1, 1)));
 }
 
 test "transpose" {
@@ -693,15 +693,15 @@ test "transpose" {
     var b = try a.transpose(ally);
     defer b.deinit();
 
-    try testing.expect(b.at(0, 0).cmp(.eq, F.from(2, 1)));
-    try testing.expect(b.at(1, 0).cmp(.eq, F.from(1, 1)));
-    try testing.expect(b.at(2, 0).cmp(.eq, F.from(3, 1)));
-    try testing.expect(b.at(0, 1).cmp(.eq, F.from(6, 1)));
-    try testing.expect(b.at(1, 1).cmp(.eq, F.from(0, 1)));
-    try testing.expect(b.at(2, 1).cmp(.eq, F.from(5, 1)));
-    try testing.expect(b.at(0, 2).cmp(.eq, F.from(8, 1)));
-    try testing.expect(b.at(1, 2).cmp(.eq, F.from(9, 1)));
-    try testing.expect(b.at(2, 2).cmp(.eq, F.from(7, 1)));
+    try testing.expect(b.at(0, 0).cmpAll(.eq, F.from(2, 1)));
+    try testing.expect(b.at(1, 0).cmpAll(.eq, F.from(1, 1)));
+    try testing.expect(b.at(2, 0).cmpAll(.eq, F.from(3, 1)));
+    try testing.expect(b.at(0, 1).cmpAll(.eq, F.from(6, 1)));
+    try testing.expect(b.at(1, 1).cmpAll(.eq, F.from(0, 1)));
+    try testing.expect(b.at(2, 1).cmpAll(.eq, F.from(5, 1)));
+    try testing.expect(b.at(0, 2).cmpAll(.eq, F.from(8, 1)));
+    try testing.expect(b.at(1, 2).cmpAll(.eq, F.from(9, 1)));
+    try testing.expect(b.at(2, 2).cmpAll(.eq, F.from(7, 1)));
 }
 
 test "matrix multiplication" {
@@ -735,15 +735,15 @@ test "matrix multiplication" {
     var c = try a.mul(b, ally);
     defer c.deinit();
 
-    try testing.expect(c.at(0, 0).cmp(.eq, F.from(2, 1)));
-    try testing.expect(c.at(0, 1).cmp(.eq, F.from(1, 1)));
-    try testing.expect(c.at(0, 2).cmp(.eq, F.from(6, 1)));
-    try testing.expect(c.at(1, 0).cmp(.eq, F.from(6, 1)));
-    try testing.expect(c.at(1, 1).cmp(.eq, F.from(0, 1)));
-    try testing.expect(c.at(1, 2).cmp(.eq, F.from(11, 1)));
-    try testing.expect(c.at(2, 0).cmp(.eq, F.from(8, 1)));
-    try testing.expect(c.at(2, 1).cmp(.eq, F.from(9, 1)));
-    try testing.expect(c.at(2, 2).cmp(.eq, F.from(24, 1)));
+    try testing.expect(c.at(0, 0).cmpAll(.eq, F.from(2, 1)));
+    try testing.expect(c.at(0, 1).cmpAll(.eq, F.from(1, 1)));
+    try testing.expect(c.at(0, 2).cmpAll(.eq, F.from(6, 1)));
+    try testing.expect(c.at(1, 0).cmpAll(.eq, F.from(6, 1)));
+    try testing.expect(c.at(1, 1).cmpAll(.eq, F.from(0, 1)));
+    try testing.expect(c.at(1, 2).cmpAll(.eq, F.from(11, 1)));
+    try testing.expect(c.at(2, 0).cmpAll(.eq, F.from(8, 1)));
+    try testing.expect(c.at(2, 1).cmpAll(.eq, F.from(9, 1)));
+    try testing.expect(c.at(2, 2).cmpAll(.eq, F.from(24, 1)));
 }
 
 test "matrix addition and subtraction" {
@@ -777,15 +777,15 @@ test "matrix addition and subtraction" {
     var c = try a.add(b, ally);
     defer c.deinit();
 
-    try testing.expect(c.at(0, 0).cmp(.eq, F.from(3, 1)));
-    try testing.expect(c.at(0, 1).cmp(.eq, F.zero));
-    try testing.expect(c.at(0, 2).cmp(.eq, F.from(2, 1)));
-    try testing.expect(c.at(1, 0).cmp(.eq, F.zero));
-    try testing.expect(c.at(1, 1).cmp(.eq, F.from(1, 1)));
-    try testing.expect(c.at(1, 2).cmp(.eq, F.from(6, 1)));
-    try testing.expect(c.at(2, 0).cmp(.eq, F.from(8, 1)));
-    try testing.expect(c.at(2, 1).cmp(.eq, F.from(9, 1)));
-    try testing.expect(c.at(2, 2).cmp(.eq, F.zero));
+    try testing.expect(c.at(0, 0).cmpAll(.eq, F.from(3, 1)));
+    try testing.expect(c.at(0, 1).cmpAll(.eq, F.zero));
+    try testing.expect(c.at(0, 2).cmpAll(.eq, F.from(2, 1)));
+    try testing.expect(c.at(1, 0).cmpAll(.eq, F.zero));
+    try testing.expect(c.at(1, 1).cmpAll(.eq, F.from(1, 1)));
+    try testing.expect(c.at(1, 2).cmpAll(.eq, F.from(6, 1)));
+    try testing.expect(c.at(2, 0).cmpAll(.eq, F.from(8, 1)));
+    try testing.expect(c.at(2, 1).cmpAll(.eq, F.from(9, 1)));
+    try testing.expect(c.at(2, 2).cmpAll(.eq, F.zero));
 
     // 2 0 1   1 0 1   1 0 0
     // 0 0 5 - 0 1 1 = 0-1 4
@@ -794,15 +794,15 @@ test "matrix addition and subtraction" {
     var d = try a.sub(b, ally);
     defer d.deinit();
 
-    try testing.expect(d.at(0, 0).cmp(.eq, F.from(1, 1)));
-    try testing.expect(d.at(0, 1).cmp(.eq, F.zero));
-    try testing.expect(d.at(0, 2).cmp(.eq, F.zero));
-    try testing.expect(d.at(1, 0).cmp(.eq, F.zero));
-    try testing.expect(d.at(1, 1).cmp(.eq, F.from(-1, 1)));
-    try testing.expect(d.at(1, 2).cmp(.eq, F.from(4, 1)));
-    try testing.expect(d.at(2, 0).cmp(.eq, F.from(8, 1)));
-    try testing.expect(d.at(2, 1).cmp(.eq, F.from(9, 1)));
-    try testing.expect(d.at(2, 2).cmp(.eq, F.from(-2, 1)));
+    try testing.expect(d.at(0, 0).cmpAll(.eq, F.from(1, 1)));
+    try testing.expect(d.at(0, 1).cmpAll(.eq, F.zero));
+    try testing.expect(d.at(0, 2).cmpAll(.eq, F.zero));
+    try testing.expect(d.at(1, 0).cmpAll(.eq, F.zero));
+    try testing.expect(d.at(1, 1).cmpAll(.eq, F.from(-1, 1)));
+    try testing.expect(d.at(1, 2).cmpAll(.eq, F.from(4, 1)));
+    try testing.expect(d.at(2, 0).cmpAll(.eq, F.from(8, 1)));
+    try testing.expect(d.at(2, 1).cmpAll(.eq, F.from(9, 1)));
+    try testing.expect(d.at(2, 2).cmpAll(.eq, F.from(-2, 1)));
 }
 
 test "LU solve" {
@@ -844,12 +844,12 @@ test "LU solve" {
     var b_ = try a.mulV(x, ally);
     defer b_.deinit(ally);
 
-    try testing.expect(b.at(0).cmp(.eq, b_.at(0)));
-    try testing.expect(b.at(1).cmp(.eq, b_.at(1)));
-    try testing.expect(b.at(2).cmp(.eq, b_.at(2)));
+    try testing.expect(b.at(0).cmpAll(.eq, b_.at(0)));
+    try testing.expect(b.at(1).cmpAll(.eq, b_.at(1)));
+    try testing.expect(b.at(2).cmpAll(.eq, b_.at(2)));
 
     //check det
-    try testing.expect(F.from(78, 1).cmp(.eq, lu.det()));
+    try testing.expect(F.from(78, 1).cmpAll(.eq, lu.det()));
 
     //reconstuct a from LU
     var l = try lu.lt.transpose(ally);
@@ -861,13 +861,13 @@ test "LU solve" {
     const a_ = try l.mul(lu.u, ally);
     defer a_.deinit();
 
-    try testing.expect(a.at(0, 0).cmp(.eq, a_.at(0, 0)));
-    try testing.expect(a.at(0, 1).cmp(.eq, a_.at(0, 1)));
-    try testing.expect(a.at(0, 2).cmp(.eq, a_.at(0, 2)));
-    try testing.expect(a.at(1, 0).cmp(.eq, a_.at(1, 0)));
-    try testing.expect(a.at(1, 1).cmp(.eq, a_.at(1, 1)));
-    try testing.expect(a.at(1, 2).cmp(.eq, a_.at(1, 2)));
-    try testing.expect(a.at(2, 0).cmp(.eq, a_.at(2, 0)));
-    try testing.expect(a.at(2, 1).cmp(.eq, a_.at(2, 1)));
-    try testing.expect(a.at(2, 2).cmp(.eq, a_.at(2, 2)));
+    try testing.expect(a.at(0, 0).cmpAll(.eq, a_.at(0, 0)));
+    try testing.expect(a.at(0, 1).cmpAll(.eq, a_.at(0, 1)));
+    try testing.expect(a.at(0, 2).cmpAll(.eq, a_.at(0, 2)));
+    try testing.expect(a.at(1, 0).cmpAll(.eq, a_.at(1, 0)));
+    try testing.expect(a.at(1, 1).cmpAll(.eq, a_.at(1, 1)));
+    try testing.expect(a.at(1, 2).cmpAll(.eq, a_.at(1, 2)));
+    try testing.expect(a.at(2, 0).cmpAll(.eq, a_.at(2, 0)));
+    try testing.expect(a.at(2, 1).cmpAll(.eq, a_.at(2, 1)));
+    try testing.expect(a.at(2, 2).cmpAll(.eq, a_.at(2, 2)));
 }
