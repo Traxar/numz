@@ -21,8 +21,8 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         f: @Vector(SIMDsize, float),
 
         /// return a SIMD version of `@This()` with SIMD size `size_`
-        pub fn SIMDType(comptime size_: ?comptime_int) type {
-            return SIMDFloat(float, size_);
+        pub fn SIMDType(comptime size_: ?usize) type {
+            return SIMDFloat(size_, float);
         }
 
         /// the 0 element
@@ -57,6 +57,16 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
             return Scalar{ .f = a.f / b.f };
         }
 
+        ///returns the minimum of a and b
+        pub inline fn min(a: Scalar, b: Scalar) Scalar {
+            return Scalar{ .f = @min(a.f, b.f) };
+        }
+
+        ///returns the maximum of a and b
+        pub inline fn max(a: Scalar, b: Scalar) Scalar {
+            return Scalar{ .f = @max(a.f, b.f) };
+        }
+
         /// returns -a
         pub inline fn neg(a: Scalar) Scalar {
             return Scalar{ .f = -a.f };
@@ -79,8 +89,28 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
             return Scalar{ .f = @log2(a.f) };
         }
 
+        /// return sum(a)
+        pub inline fn SIMDsum(a: Scalar) SIMDType(1) {
+            return SIMDType(1){ .f = [_]float{@reduce(.Add, a.f)} };
+        }
+
+        /// return prod(a)
+        pub inline fn SIMDprod(a: Scalar) SIMDType(1) {
+            return SIMDType(1){ .f = [_]float{@reduce(.Mul, a.f)} };
+        }
+
+        /// return min(a)
+        pub inline fn SIMDmin(a: Scalar) SIMDType(1) {
+            return SIMDType(1){ .f = [_]float{@reduce(.Min, a.f)} };
+        }
+
+        /// return max(a)
+        pub inline fn SIMDmax(a: Scalar) SIMDType(1) {
+            return SIMDType(1){ .f = [_]float{@reduce(.Max, a.f)} };
+        }
+
         /// returns truth value of: a r b
-        pub inline fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
+        pub fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
             return switch (r) {
                 .eq => a.f == b.f,
                 .lt => a.f < b.f,
@@ -93,16 +123,6 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
 
         pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
             return @reduce(.And, a.SIMDcmp(r, b));
-        }
-
-        ///returns the minimum of a and b
-        pub inline fn min(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = @min(a.f, b.f) };
-        }
-
-        ///returns the maximum of a and b
-        pub inline fn max(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = @max(a.f, b.f) };
         }
     };
 }
@@ -180,5 +200,11 @@ test "float SIMD" {
         const b = F.from(527, 100);
         const c = F{ .f = a.f + b.f };
         try testing.expect(c.cmp(.eq, a.add(b)));
+
+        //not sure how to nicely test the results yet
+        _ = a.SIMDsum();
+        _ = a.SIMDprod();
+        _ = a.SIMDmin();
+        _ = a.SIMDmax();
     }
 }
