@@ -89,24 +89,12 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
             return Scalar{ .f = @log2(a.f) };
         }
 
-        /// return sum(a)
-        pub inline fn SIMDsum(a: Scalar) SIMDType(1) {
-            return SIMDType(1){ .f = [_]float{@reduce(.Add, a.f)} };
-        }
-
-        /// return prod(a)
-        pub inline fn SIMDprod(a: Scalar) SIMDType(1) {
-            return SIMDType(1){ .f = [_]float{@reduce(.Mul, a.f)} };
-        }
-
-        /// return min(a)
-        pub inline fn SIMDmin(a: Scalar) SIMDType(1) {
-            return SIMDType(1){ .f = [_]float{@reduce(.Min, a.f)} };
-        }
-
-        /// return max(a)
-        pub inline fn SIMDmax(a: Scalar) SIMDType(1) {
-            return SIMDType(1){ .f = [_]float{@reduce(.Max, a.f)} };
+        /// return red(a)
+        pub inline fn SIMDred(a: Scalar, red: std.builtin.ReduceOp) SIMDType(1) {
+            return switch (red) {
+                .Add, .Mul, .Min, .Max => SIMDType(1){ .f = [_]float{@reduce(red, a.f)} },
+                else => unreachable,
+            };
         }
 
         /// returns truth value of: a r b
@@ -202,9 +190,6 @@ test "float SIMD" {
         try testing.expect(c.cmp(.eq, a.add(b)));
 
         //not sure how to nicely test the results yet
-        _ = a.SIMDsum();
-        _ = a.SIMDprod();
-        _ = a.SIMDmin();
-        _ = a.SIMDmax();
+        _ = a.SIMDred(.Add);
     }
 }
