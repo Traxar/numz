@@ -1,4 +1,5 @@
 # numz
+
 This is a numerics library written in zig.
 
 ToDo:
@@ -23,5 +24,5 @@ Planned Features:
 
 Design Choices:
 
-    * functions on structs (like vectors and matrices) only take an allocator as an argument if the result has to be freed.
+    * functions on structs (like vectors and matrices) only take an allocator as an argument if the result has to be freed. If a struct is supposed to support "inplace" operations that need allocation, the struct has to store its allocator.
 

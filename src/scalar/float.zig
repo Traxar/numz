@@ -4,15 +4,16 @@ const assert = std.debug.assert;
 const CompareOperator = std.math.CompareOperator;
 const Allocator = std.mem.Allocator;
 
-/// scalar data structure for computation
-/// choose `float` from `{f16, f32, f64, f80, f128}`
+/// Scalar data structure for computation.
+/// Choose `float` from `{f16, f32, f64, f80, f128}`.
 pub fn Float(comptime float: type) type {
     return SIMDFloat(1, float);
 }
 
-/// scalar data structure for SIMD computation
-/// choose `float` from `{f16, f32, f64, f80, f128}`
-/// `size` determines the SIMD size. if `size` is set to `null` the SIMD size will be choosen based on an heuristic
+/// Scalar data structure for SIMD computation.
+/// This is ment for internal use, for scalar computations in userspace use `Float()` instead.
+/// Choose `float` from `{f16, f32, f64, f80, f128}`.
+/// `size` determines the SIMD size. if `size` is set to `null` the SIMD size will be choosen based on a heuristic
 pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
     assert(size != 0);
     return struct {
@@ -31,7 +32,7 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         /// the 1 element
         pub const eye = Scalar{ .f = @splat(1) };
 
-        /// return element isomorph to f
+        /// return element isomorph to p/q
         pub fn from(p: isize, q: usize) Scalar {
             assert(q != 0);
             return Scalar{ .f = @splat(@as(float, @floatFromInt(p)) / @as(float, @floatFromInt(q))) };
@@ -97,7 +98,7 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
             };
         }
 
-        /// returns truth value of: a r b
+        /// returns truth value of a r b
         pub fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
             return switch (r) {
                 .eq => a.f == b.f,
@@ -109,6 +110,7 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
             };
         }
 
+        /// returns true iff a r b holds for all SIMD elements
         pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
             return @reduce(.And, a.SIMDcmp(r, b));
         }
@@ -131,11 +133,8 @@ test "float operators" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
         const F = Float(f);
-        const q = 100;
-        const a_ = -314;
-        const b_ = 527;
-        const a = F.from(a_, q);
-        const b = F.from(b_, q);
+        const a = F.from(-314, 100);
+        const b = F.from(527, 100);
         try testing.expectEqual(a.f + b.f, a.add(b).f);
         try testing.expectEqual(a.f - b.f, a.sub(b).f);
         try testing.expectEqual(b.f - a.f, b.sub(a).f);
@@ -188,8 +187,6 @@ test "float SIMD" {
         const b = F.from(527, 100);
         const c = F{ .f = a.f + b.f };
         try testing.expect(c.cmp(.eq, a.add(b)));
-
-        //not sure how to nicely test the results yet
         _ = a.SIMDred(.Add);
     }
 }
