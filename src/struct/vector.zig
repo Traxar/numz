@@ -6,9 +6,6 @@ const Allocator = std.mem.Allocator;
 /// return struct that can allocate and free vectors
 /// operations by this struct create new vectors
 pub fn VectorType(comptime Scalar: type) type {
-    const SIMDScalar = Scalar.SIMDType(null);
-    const SIMDsize = SIMDScalar.SIMDsize;
-
     return struct {
         const Vector = @This();
         val: std.MultiArrayList(Scalar).Slice,
@@ -24,17 +21,19 @@ pub fn VectorType(comptime Scalar: type) type {
 
         /// allocate vector with n elements with value a
         pub fn rep(a: Scalar, n: usize, allocator: Allocator) !Vector {
+            const SIMDScalar = Scalar.SIMDType(null);
+            const SIMDsize = SIMDScalar.SIMDsize;
             var res = try Vector.init(n, allocator);
             const ii = n - @mod(n, SIMDsize);
             var i: usize = 0;
             if (ii >= 1) {
                 const SIMDa = a.SIMDsplat(SIMDScalar);
                 while (i < ii) : (i += SIMDsize) {
-                    SIMDa.toVec(res.val, i);
+                    res.SIMDset(i, SIMDa);
                 }
             }
             while (i < n) : (i += 1) {
-                a.toVec(res.val, i);
+                res.SIMDset(i, a);
             }
             return res;
         }
@@ -53,14 +52,36 @@ pub fn VectorType(comptime Scalar: type) type {
             };
         }
 
+        pub inline fn SIMDat(a: Vector, starting_index: usize, comptime SIMDType: type) SIMDType {
+            assert(SIMDType.SIMDType(1) == Scalar);
+            var res = SIMDType.init();
+            inline for (std.meta.fields(SIMDType), std.meta.fields(Scalar), a.val.ptrs) |dest_field, field, byte_ptr| {
+                const casted_ptr: [*]field.type = @ptrCast(@alignCast(byte_ptr));
+                @field(res, field.name) = @as(*dest_field.type, @ptrCast(@alignCast(&casted_ptr[starting_index]))).*;
+            }
+            return res;
+        }
+
         /// return element at index i
         pub fn at(a: Vector, i: usize) Scalar {
-            return Scalar.fromVec(a.val, i);
+            return a.SIMDat(i, Scalar);
+        }
+
+        pub inline fn SIMDset(a: Vector, starting_index: usize, b: anytype) void {
+            assert(@TypeOf(b).SIMDType(1) == Scalar);
+            const SIMDType = @TypeOf(b);
+            const SIMDsize = SIMDType.SIMDsize;
+            inline for (std.meta.fields(SIMDType), std.meta.fields(Scalar), a.val.ptrs) |src_field, field, byte_ptr| {
+                const casted_ptr: [*]field.type = @ptrCast(@alignCast(byte_ptr));
+                const dest = casted_ptr[starting_index .. starting_index + SIMDsize];
+                const src: *const [SIMDsize]field.type = @ptrCast(&@field(b, src_field.name));
+                @memcpy(dest, src);
+            }
         }
 
         /// set element at index i to b
         pub fn set(a: Vector, i: usize, b: Scalar) void {
-            b.toVe(a.val, i);
+            a.SIMDset(i, b);
         }
 
         /// TODO SIMDify
@@ -216,7 +237,6 @@ test "creation" {
 
     const a = F.from(-314, 100);
     var v = try V.rep(a, n, ally);
-    //var v = try V.init(n, ally);
     defer v.deinit(ally);
 
     try testing.expectEqual(@as(usize, n), v.val.len);

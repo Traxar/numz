@@ -32,6 +32,11 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         /// the 1 element
         pub const eye = Scalar{ .f = @splat(1) };
 
+        /// return scalar with undefined value
+        pub inline fn init() Scalar {
+            return Scalar{ .f = undefined };
+        }
+
         /// return element isomorph to p/q
         pub fn from(p: isize, q: usize) Scalar {
             assert(q != 0);
@@ -120,20 +125,6 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         /// returns true iff a r b holds for all SIMD elements
         pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
             return @reduce(.And, a.SIMDcmp(r, b));
-        }
-
-        //TODO: move to vector.zig
-        pub inline fn fromVec(slice: std.MultiArrayList(Scalar.SIMDType(1)).Slice, starting_index: usize) Scalar {
-            return Scalar{
-                .f = @as(*@Vector(SIMDsize, float), @ptrCast(&slice.items(.f)[starting_index])).*,
-            };
-        }
-
-        //TODO: move to vector.zig
-        pub inline fn toVec(a: Scalar, slice: std.MultiArrayList(Scalar.SIMDType(1)).Slice, starting_index: usize) void {
-            const dest = slice.items(.f)[starting_index .. starting_index + SIMDsize];
-            const src: *const [SIMDsize]@Vector(1, float) = @ptrCast(&a.f);
-            @memcpy(dest, src);
         }
     };
 }
