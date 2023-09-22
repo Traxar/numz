@@ -18,7 +18,7 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
     assert(size != 0);
     return struct {
         const Scalar = @This();
-        const SIMDsize: usize = size orelse (std.simd.suggestVectorSize(float) orelse 1);
+        pub const SIMDsize: usize = size orelse (std.simd.suggestVectorSize(float) orelse 1);
         f: @Vector(SIMDsize, float),
 
         /// return a SIMD version of `@This()` with SIMD size `size_`
@@ -91,11 +91,18 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         }
 
         /// return red(a)
-        pub inline fn SIMDred(a: Scalar, red: std.builtin.ReduceOp) SIMDType(1) {
+        pub inline fn SIMDred(a: Scalar, comptime red: std.builtin.ReduceOp) SIMDType(1) {
             return switch (red) {
                 .Add, .Mul, .Min, .Max => SIMDType(1){ .f = [_]float{@reduce(red, a.f)} },
                 else => unreachable,
             };
+        }
+
+        /// return splat(a)
+        pub inline fn SIMDsplat(a: Scalar, comptime SIMD_Scalar: type) SIMD_Scalar {
+            assert(Scalar.SIMDsize == 1);
+            assert(Scalar == SIMD_Scalar.SIMDType(1));
+            return SIMD_Scalar{ .f = @splat(a.f[0]) };
         }
 
         /// returns truth value of a r b
@@ -113,6 +120,20 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         /// returns true iff a r b holds for all SIMD elements
         pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
             return @reduce(.And, a.SIMDcmp(r, b));
+        }
+
+        //TODO: move to vector.zig
+        pub inline fn fromVec(slice: std.MultiArrayList(Scalar.SIMDType(1)).Slice, starting_index: usize) Scalar {
+            return Scalar{
+                .f = @as(*@Vector(SIMDsize, float), @ptrCast(&slice.items(.f)[starting_index])).*,
+            };
+        }
+
+        //TODO: move to vector.zig
+        pub inline fn toVec(a: Scalar, slice: std.MultiArrayList(Scalar.SIMDType(1)).Slice, starting_index: usize) void {
+            const dest = slice.items(.f)[starting_index .. starting_index + SIMDsize];
+            const src: *const [SIMDsize]@Vector(1, float) = @ptrCast(&a.f);
+            @memcpy(dest, src);
         }
     };
 }
@@ -184,7 +205,7 @@ test "float SIMD" {
     inline for (fTypes) |f| {
         const F = SIMDFloat(null, f);
         const a = F.from(-314, 100);
-        const b = F.from(527, 100);
+        const b = Float(f).from(527, 100).SIMDsplat(F);
         const c = F{ .f = a.f + b.f };
         try testing.expect(c.cmp(.eq, a.add(b)));
         _ = a.SIMDred(.Add);
