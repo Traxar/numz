@@ -103,15 +103,8 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
             };
         }
 
-        /// return splat(a)
-        pub inline fn SIMDsplat(a: Scalar, comptime SIMD_Scalar: type) SIMD_Scalar {
-            assert(Scalar.SIMDsize == 1);
-            assert(Scalar == SIMD_Scalar.SIMDType(1));
-            return SIMD_Scalar{ .f = @splat(a.f[0]) };
-        }
-
         /// returns truth value of a r b
-        pub fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
+        fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
             return switch (r) {
                 .eq => a.f == b.f,
                 .lt => a.f < b.f,
@@ -196,7 +189,7 @@ test "float SIMD" {
     inline for (fTypes) |f| {
         const F = SIMDFloat(null, f);
         const a = F.from(-314, 100);
-        const b = Float(f).from(527, 100).SIMDsplat(F);
+        const b = F.from(527, 100);
         const c = F{ .f = a.f + b.f };
         try testing.expect(c.cmp(.eq, a.add(b)));
         _ = a.SIMDred(.Add);
