@@ -6,23 +6,27 @@ ToDo:
 
     * improve comments and doc comments
     * better test checks for vectors and matrices
-    * 2nd permutation type without inverse
     * benchmarks 
 
 Planned Features:
 
     [x] type of scalars is easily interchangeable.
     [ ] provide truly deterministic decimals.
+    [ ] support complex numbers
     [x] Vectors
-        [ ] SIMD support
-    [x] Permutations
-    [x] Sparse matrices
-        [x] LU solver
+        [x] SIMD support
+    [x] Permutations (variants with and without inverse)
+    [.] Sparse matrices (no SIMD support)
+        [.] LU solver
+    [ ] dense matrices (SIMD support)
+        [ ] solver
     [ ] Meshes
     [ ] PDE toolbox
     [ ] visualization options, for a start a CLI print
 
 Design Choices:
 
-    * functions on structs (like vectors and matrices) only take an allocator as an argument if the result has to be freed. If a struct is supposed to support "inplace" operations that need allocation, the struct has to store its allocator.
+    * functions on structs (like vectors and matrices) only take an allocator as an argument if the result has to be freed. If a struct is supposed to support "inplace" operations (ex: sparse matrix set element) that need allocation, the struct has to store its allocator.
+    * functions with allocated results (ex: vector addition) take the result location as an argument.
+    * functions with stack results (ex: float addition) return their result.
 

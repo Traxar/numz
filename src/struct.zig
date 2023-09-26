@@ -1,11 +1,13 @@
 pub const Permutation = @import("struct/permutation.zig").Permutation;
-pub const Scalars = @import("struct/scalar.zig");
+pub const BiPermutation = @import("struct/permutation.zig").BiPermutationType;
+pub const Field = @import("struct/field.zig");
 pub const Vector = @import("struct/vector.zig").VectorType;
-pub const Matrix = @import("struct/matrix.zig").MatrixType;
+//pub const Matrix = @import("struct/matrix.zig").MatrixType;
 
 test "structures" {
-    _ = Scalars;
+    _ = Field;
     _ = Vector;
     _ = Permutation;
+    _ = BiPermutation;
     //_ = Matrix;
 }
