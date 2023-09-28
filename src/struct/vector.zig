@@ -27,14 +27,19 @@ pub fn VectorType(comptime Element: type) type {
             allocator.free(a.val);
         }
 
-        /// allocate vector with n elements all set to a
-        pub fn rep(a: Element, n: usize, allocator: Allocator) !Vector {
-            var res = try Vector.init(n, allocator);
+        /// set all elements of a to b
+        pub fn fill(res: Vector, a: Element) void {
             const a_SIMD = SIMDsplat(a);
             for (0..res.val.len) |i| {
                 res.val[i] = a_SIMD;
             }
             res.SIMDsetTail(SIMDElement.zero);
+        }
+
+        /// allocate vector with n elements all set to a
+        pub fn rep(a: Element, n: usize, allocator: Allocator) !Vector {
+            var res = try Vector.init(n, allocator);
+            res.fill(a);
             return res;
         }
 

@@ -15,7 +15,7 @@ Planned Features:
     [ ] support complex numbers
     [x] Vectors
         [x] SIMD support
-    [x] Permutations (variants with and without inverse)
+    [x] Permutations
     [.] Sparse matrices (no SIMD support)
         [.] LU solver
     [ ] dense matrices (SIMD support)

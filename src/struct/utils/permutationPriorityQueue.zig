@@ -2,18 +2,20 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const Permutation = @import("../../struct.zig").Permutation;
+const PermutationType = @import("../../struct.zig").Permutation;
 
-pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a: Priority, b: Priority) bool) type {
+/// priorityqueue for given number of elements where the order of the elements popped can be retrieved as a permutation
+pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a: Priority, b: Priority) bool, comptime Index: type) type {
     return struct {
         const Self = @This();
+        const Permutation = PermutationType(Index);
 
         items: Permutation,
         priorities: [*]Priority,
-        len: usize, //current queue length
+        len: Index, //current queue length
 
         ///Initialize and return priority queue
-        pub fn init(n: usize, allocator: Allocator) !Self {
+        pub fn init(n: Index, allocator: Allocator) !Self {
             return Self{
                 .items = try Permutation.eye(n, allocator),
                 .priorities = (try allocator.alloc(Priority, n)).ptr,
@@ -31,16 +33,16 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             return self.items;
         }
 
-        pub fn capacity(self: Self) usize {
+        pub fn capacity(self: Self) Index {
             return self.items.len;
         }
 
         //returns true if the the element is currently in the queue
-        pub fn isQueued(self: Self, elem: usize) bool {
+        pub fn isQueued(self: Self, elem: Index) bool {
             return self.items.atInv(elem) >= self.capacity() - self.len;
         }
 
-        pub fn set(self: *Self, elem: usize, priority: Priority) void {
+        pub fn set(self: *Self, elem: Index, priority: Priority) void {
             if (self.isQueued(elem)) { //update item
                 const old_priority = self.priorities[elem];
                 const current_index = self.items.atInv(elem);
@@ -60,7 +62,7 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             }
         }
 
-        fn siftUp(self: *Self, start_index: usize) void {
+        fn siftUp(self: *Self, start_index: Index) void {
             var child_index = start_index;
             const child = self.items.at(child_index);
             const child_priority = self.priorities[child];
@@ -74,7 +76,7 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             }
         }
 
-        fn siftDown(self: *Self, start_index: usize) void {
+        fn siftDown(self: *Self, start_index: Index) void {
             var index = start_index;
             while (true) {
                 var first_index = index;
@@ -107,12 +109,12 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             }
         }
 
-        pub fn peek(self: *Self) usize {
+        pub fn peek(self: *Self) Index {
             assert(self.len > 0);
             return self.items.at(self.capacity() - 1);
         }
 
-        pub fn remove(self: *Self) usize {
+        pub fn remove(self: *Self) Index {
             assert(self.len > 0);
             const first_index = self.capacity() - 1;
             const first = self.items.at(first_index);
@@ -124,14 +126,14 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
     };
 }
 
-test "queueing elements" {
+test "permutation queue" {
     const ally = testing.allocator;
     const P = struct {
         fn lt(a: f32, b: f32) bool {
             return a < b;
         }
     };
-    const PPQ = PermutationPriorityQueue(f32, P.lt);
+    const PPQ = PermutationPriorityQueue(f32, P.lt, usize);
     var queue = try PPQ.init(6, ally);
     //defer queue.deinit(ally);
 
