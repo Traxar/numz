@@ -88,7 +88,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// set element at index i to b
-        pub fn set(a: *Vector, i: usize, b: Element) void {
+        pub fn set(a: Vector, i: usize, b: Element) void {
             assert(i < a.len);
             const i_SIMD = @divFloor(i, SIMDsize);
             const i_sub = i - i_SIMD * SIMDsize;
@@ -98,7 +98,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// res <- a + b
-        pub fn add(res: Vector, a: Vector, b: Vector) void {
+        pub fn add(a: Vector, b: Vector, res: Vector) void {
             assert(res.len == a.len);
             assert(a.len == b.len);
             for (0..res.val.len) |i_SIMD| {
@@ -107,7 +107,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// res <- a - b
-        pub fn sub(res: Vector, a: Vector, b: Vector) void {
+        pub fn sub(a: Vector, b: Vector, res: Vector) void {
             assert(res.len == a.len);
             assert(a.len == b.len);
             for (0..res.val.len) |i_SIMD| {
@@ -116,7 +116,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// res <- a * b
-        pub fn mulS(res: Vector, a: Vector, b: Element) void {
+        pub fn mulE(a: Vector, b: Element, res: Vector) void {
             assert(res.len == a.len);
             const c = Vector.SIMDsplat(b);
             for (0..res.val.len) |i_SIMD| {
@@ -125,7 +125,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// res <- a * b
-        pub fn mul(res: Vector, a: Vector, b: Vector) void {
+        pub fn mul(a: Vector, b: Vector, res: Vector) void {
             assert(res.len == a.len);
             assert(a.len == b.len);
             for (0..res.val.len) |i_SIMD| {
@@ -134,7 +134,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// res <- a / b
-        pub fn divS(res: Vector, a: Vector, b: Element) void {
+        pub fn divE(a: Vector, b: Element, res: Vector) void {
             assert(res.len == a.len);
             const c = Vector.SIMDsplat(b);
             for (0..res.val.len) |i_SIMD| {
@@ -143,7 +143,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// res <- a / b
-        pub fn div(res: Vector, a: Vector, b: Vector) void {
+        pub fn div(a: Vector, b: Vector, res: Vector) void {
             assert(res.len == a.len);
             assert(a.len == b.len);
             for (0..res.val.len) |i_SIMD| {
@@ -246,23 +246,23 @@ test "vector operators" {
     try testing.expect(b.at(2).cmp(.eq, b_));
 
     const c = try V.init(n, ally);
-    c.add(a, b);
+    a.add(b, c);
     defer c.deinit(ally);
     try testing.expect(c.at(0).cmp(.eq, a_.add(F.eye)));
     try testing.expect(c.at(1).cmp(.eq, b_));
     try testing.expect(c.at(2).cmp(.eq, a_.add(b_)));
 
-    c.sub(a, b);
+    a.sub(b, c);
     try testing.expect(c.at(0).cmp(.eq, a_.sub(F.eye)));
     try testing.expect(c.at(1).cmp(.eq, b_.neg()));
     try testing.expect(c.at(2).cmp(.eq, a_.sub(b_)));
 
-    c.mul(a, b);
+    a.mul(b, c);
     try testing.expect(c.at(0).cmp(.eq, a_));
     try testing.expect(c.at(1).cmp(.eq, F.zero));
     try testing.expect(c.at(2).cmp(.eq, a_.mul(b_)));
 
-    c.div(a, b);
+    a.div(b, c);
     try testing.expect(c.at(0).cmp(.eq, a_));
     try testing.expect(c.at(1).cmp(.eq, F.zero));
     try testing.expect(c.at(2).cmp(.eq, a_.div(b_)));

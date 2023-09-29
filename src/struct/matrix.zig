@@ -105,7 +105,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         /// return number of entries in the row
-        fn entAt(a: Matrix, row: usize) usize {
+        inline fn entAt(a: Matrix, row: usize) usize {
             return a.val[row].len;
         }
 
@@ -166,30 +166,36 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         /// res <- a * b
+        /// can not fail if res == a
         /// O(n*m)
-        pub fn mulS(res: *Matrix, a: Matrix, b: Element) !void {
-            if (res.val != a.val) {
-                res.deinit();
-                res.* = try zero(a.rows, a.cols, res.allocator);
-                for (0..res.rows) |i| {
-                    try res.val[i].ensureTotalCapacity(res.allocator, a.val[i].len);
+        pub fn mulE(a: Matrix, b: Element, res: Matrix) !void {
+            if (res.val == a.val) {
+                for (0..a.rows) |i| {
+                    const e = a.entAt(i);
+                    for (1..e + 1) |j_| {
+                        const j = e - j_; //reverse order in case of multiplying by zero
+                        res.setAt(i, j, true, a.colAt(i, j), a.valAt(i, j, true).mul(b)) catch unreachable;
+                    }
                 }
-            }
-            for (0..a.rows) |i| {
-                const e = a.entAt(i);
-                for (1..e + 1) |j_| {
-                    const j = e - j_;
-                    res.setAt(i, j, true, 0, a.valAt(i, j, true).mul(b)) catch unreachable;
+            } else {
+                assert(res.rows == a.rows);
+                assert(res.cols == a.cols);
+                for (0..res.rows) |i| {
+                    try res.val[i].ensureTotalCapacity(res.allocator, a.entAt(i));
+                    res.val[i].len = 0;
+                    for (0..a.entAt(i)) |j| {
+                        res.setAt(i, j, false, a.colAt(i, j), a.valAt(i, j, true).mul(b)) catch unreachable;
+                    }
                 }
             }
         }
 
         /// res <- a * b
         /// O(n*m)
-        pub fn mulV(a: Matrix, b: Vector, res: *Vector) void {
+        pub fn mulV(a: Matrix, b: Vector, res: Vector) void {
             assert(a.cols == b.len);
             assert(a.rows == res.len);
-            assert(&b != res);
+            assert(b.val.ptr != res.val.ptr);
             res.fill(Element.zero);
             for (0..a.rows) |i| {
                 for (0..a.entAt(i)) |j| {
@@ -217,20 +223,26 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         /// res <- a / b
+        /// can not fail if res == a
         /// O(n*m)
-        pub fn divS(res: *Matrix, a: Matrix, b: Element) !void {
-            if (res.val != a.val) {
-                res.deinit();
-                res.* = try zero(a.rows, a.cols, res.allocator);
-                for (0..res.rows) |i| {
-                    try res.val[i].ensureTotalCapacity(res.allocator, a.val[i].len);
+        pub fn divE(a: Matrix, b: Element, res: Matrix) !void {
+            if (res.val == a.val) {
+                for (0..a.rows) |i| {
+                    const e = a.entAt(i);
+                    for (1..e + 1) |j_| {
+                        const j = e - j_; //reverse order in case of multiplying by zero
+                        res.setAt(i, j, true, a.colAt(i, j), a.valAt(i, j, true).div(b)) catch unreachable;
+                    }
                 }
-            }
-            for (0..a.rows) |i| {
-                const e = a.entAt(i);
-                for (1..e + 1) |j_| {
-                    const j = e - j_;
-                    res.setAt(i, j, true, 0, a.valAt(i, j, true).div(b)) catch unreachable;
+            } else {
+                assert(res.rows == a.rows);
+                assert(res.cols == a.cols);
+                for (0..res.rows) |i| {
+                    try res.val[i].ensureTotalCapacity(res.allocator, a.entAt(i));
+                    res.val[i].len = 0;
+                    for (0..a.entAt(i)) |j| {
+                        res.setAt(i, j, false, a.colAt(i, j), a.valAt(i, j, true).div(b)) catch unreachable;
+                    }
                 }
             }
         }
@@ -627,7 +639,7 @@ test "matrix mulpiplication with element" {
     const n = 3;
     const a_ = F.from(-314, 100);
     var a = try M.eye(n, ally);
-    try a.mulS(a, a_);
+    try a.mulE(a_, a);
     defer a.deinit();
     for (0..n) |i| {
         for (0..n) |j| {
@@ -638,7 +650,7 @@ test "matrix mulpiplication with element" {
             }
         }
     }
-    a.divS(a, a_);
+    try a.divE(a_, a);
     for (0..n) |i| {
         for (0..n) |j| {
             if (i == j) {
@@ -670,7 +682,7 @@ test "matrix mulpiplication with vector" {
 
     var av = try V.init(n, ally);
     defer av.deinit(ally);
-    a.mulV(v, &av);
+    a.mulV(v, av);
     try testing.expect(av.at(0).cmp(.eq, F.from(-2, 1)));
     try testing.expect(av.at(1).cmp(.eq, F.from(1, 1)));
     try testing.expect(av.at(2).cmp(.eq, F.from(1, 1)));
@@ -852,7 +864,7 @@ test "matrix LU solve" {
     //check solve
     var b_ = try M.Vector.init(n, ally);
     defer b_.deinit(ally);
-    a.mulV(x, &b_);
+    a.mulV(x, b_);
 
     try testing.expect(b.at(0).cmp(.eq, b_.at(0)));
     try testing.expect(b.at(1).cmp(.eq, b_.at(1)));
