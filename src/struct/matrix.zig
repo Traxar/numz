@@ -65,7 +65,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 nz_col[j] = 0;
             }
             for (0..a.rows) |i| {
-                for (0..a.entAt(i)) |j| {
+                for (0..a.lenAt(i)) |j| {
                     nz_col[a.colAt(i, j)] += 1;
                 }
             }
@@ -73,7 +73,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 try res.val[j].ensureTotalCapacity(allocator, nz_col[j]);
             }
             for (0..a.rows) |i| {
-                for (0..a.entAt(i)) |j| {
+                for (0..a.lenAt(i)) |j| {
                     res.val[a.colAt(i, j)].appendAssumeCapacity(.{ .col = i, .val = a.valAt(i, j, true) });
                 }
             }
@@ -105,7 +105,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         /// return number of entries in the row
-        inline fn entAt(a: Matrix, row: usize) usize {
+        inline fn lenAt(a: Matrix, row: usize) usize {
             return a.val[row].len;
         }
 
@@ -171,7 +171,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         pub fn mulE(a: Matrix, b: Element, res: Matrix) !void {
             if (res.val == a.val) {
                 for (0..a.rows) |i| {
-                    const e = a.entAt(i);
+                    const e = a.lenAt(i);
                     for (1..e + 1) |j_| {
                         const j = e - j_; //reverse order in case of multiplying by zero
                         res.setAt(i, j, true, a.colAt(i, j), a.valAt(i, j, true).mul(b)) catch unreachable;
@@ -181,9 +181,9 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 assert(res.rows == a.rows);
                 assert(res.cols == a.cols);
                 for (0..res.rows) |i| {
-                    try res.val[i].ensureTotalCapacity(res.allocator, a.entAt(i));
+                    try res.val[i].ensureTotalCapacity(res.allocator, a.lenAt(i));
                     res.val[i].len = 0;
-                    for (0..a.entAt(i)) |j| {
+                    for (0..a.lenAt(i)) |j| {
                         res.val[i].appendAssumeCapacity(.{ .col = a.colAt(i, j), .val = a.valAt(i, j, true).mul(b) });
                     }
                 }
@@ -198,7 +198,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             assert(b.val.ptr != res.val.ptr);
             res.fill(Element.zero);
             for (0..a.rows) |i| {
-                for (0..a.entAt(i)) |j| {
+                for (0..a.lenAt(i)) |j| {
                     res.set(i, res.at(i).add(a.valAt(i, j, true).mul(b.at(a.colAt(i, j)))));
                 }
             }
@@ -212,9 +212,9 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             assert(res.cols == b.cols);
             var _res = try zero(a.rows, b.cols, res.allocator);
             for (0..a.rows) |i| {
-                for (0..a.entAt(i)) |j| {
+                for (0..a.lenAt(i)) |j| {
                     const r = a.colAt(i, j);
-                    for (0..b.entAt(r)) |k| {
+                    for (0..b.lenAt(r)) |k| {
                         const c = b.colAt(r, k);
                         const l = _res.indAt(i, c);
                         try _res.setAt(i, l.ind, l.ex, c, _res.valAt(i, l.ind, l.ex).add(a.valAt(i, j, true).mul(b.valAt(r, k, true))));
@@ -234,7 +234,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         pub fn divE(a: Matrix, b: Element, res: Matrix) !void {
             if (res.val == a.val) {
                 for (0..a.rows) |i| {
-                    const e = a.entAt(i);
+                    const e = a.lenAt(i);
                     for (1..e + 1) |j_| {
                         const j = e - j_; //reverse order in case of multiplying by zero
                         res.setAt(i, j, true, a.colAt(i, j), a.valAt(i, j, true).div(b)) catch unreachable;
@@ -244,9 +244,9 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 assert(res.rows == a.rows);
                 assert(res.cols == a.cols);
                 for (0..res.rows) |i| {
-                    try res.val[i].ensureTotalCapacity(res.allocator, a.entAt(i));
+                    try res.val[i].ensureTotalCapacity(res.allocator, a.lenAt(i));
                     res.val[i].len = 0;
-                    for (0..a.entAt(i)) |j| {
+                    for (0..a.lenAt(i)) |j| {
                         res.val[i].appendAssumeCapacity(.{ .col = a.colAt(i, j), .val = a.valAt(i, j, true).div(b) });
                     }
                 }
@@ -258,19 +258,19 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         pub fn add(a: Matrix, b: Matrix, res: Matrix) !void {
             assert(a.rows == b.rows and a.rows == res.rows);
             assert(a.cols == b.cols and a.cols == res.cols);
-            var _res = try zero(res.rows, res.cols, res.allocator);
-            for (0.._res.rows) |i| {
-                try _res.val[i].ensureTotalCapacity(_res.allocator, @min(a.cols, a.entAt(i) + b.entAt(i)));
+            for (0..a.rows) |i| {
+                var _res = Row{};
+                try _res.ensureTotalCapacity(res.allocator, @min(a.cols, a.lenAt(i) + b.lenAt(i)));
                 var j_a: usize = 0;
                 var j_b: usize = 0;
                 while (true) {
-                    const col_a = if (j_a < a.entAt(i)) a.colAt(i, j_a) else a.cols;
-                    const col_b = if (j_b < b.entAt(i)) b.colAt(i, j_b) else b.cols;
+                    const col_a = if (j_a < a.lenAt(i)) a.colAt(i, j_a) else a.cols;
+                    const col_b = if (j_b < b.lenAt(i)) b.colAt(i, j_b) else b.cols;
                     if (col_a == col_b) {
                         if (col_a == a.cols) break;
                         const val = a.valAt(i, j_a, true).add(b.valAt(i, j_b, true));
                         if (val.cmp(.neq, Element.zero)) {
-                            _res.val[i].appendAssumeCapacity(.{
+                            _res.appendAssumeCapacity(.{
                                 .col = col_a,
                                 .val = val,
                             });
@@ -278,18 +278,17 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         j_a += 1;
                         j_b += 1;
                     } else if (col_a < col_b) {
-                        _res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
+                        _res.appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
                         j_a += 1;
                     } else { //col_b < col_a
-                        _res.val[i].appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true) });
+                        _res.appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true) });
                         j_b += 1;
                     }
                 }
-                _res.val[i].shrinkAndFree(_res.allocator, _res.entAt(i));
+                _res.shrinkAndFree(res.allocator, _res.len);
                 res.val[i].deinit(res.allocator);
-                res.val[i] = _res.val[i];
+                res.val[i] = _res;
             }
-            _res.allocator.free(_res.val[0.._res.rows]);
         }
 
         /// res <- a - b
@@ -297,19 +296,19 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         pub fn sub(a: Matrix, b: Matrix, res: Matrix) !void {
             assert(a.rows == b.rows and a.rows == res.rows);
             assert(a.cols == b.cols and a.cols == res.cols);
-            var _res = try zero(res.rows, res.cols, res.allocator);
-            for (0.._res.rows) |i| {
-                try _res.val[i].ensureTotalCapacity(_res.allocator, @min(a.cols, a.entAt(i) + b.entAt(i)));
+            for (0..a.rows) |i| {
+                var _res = Row{};
+                try _res.ensureTotalCapacity(res.allocator, @min(a.cols, a.lenAt(i) + b.lenAt(i)));
                 var j_a: usize = 0;
                 var j_b: usize = 0;
                 while (true) {
-                    const col_a = if (j_a < a.entAt(i)) a.colAt(i, j_a) else a.cols;
-                    const col_b = if (j_b < b.entAt(i)) b.colAt(i, j_b) else b.cols;
+                    const col_a = if (j_a < a.lenAt(i)) a.colAt(i, j_a) else a.cols;
+                    const col_b = if (j_b < b.lenAt(i)) b.colAt(i, j_b) else b.cols;
                     if (col_a == col_b) {
                         if (col_a == a.cols) break;
                         const val = a.valAt(i, j_a, true).sub(b.valAt(i, j_b, true));
                         if (val.cmp(.neq, Element.zero)) {
-                            _res.val[i].appendAssumeCapacity(.{
+                            _res.appendAssumeCapacity(.{
                                 .col = col_a,
                                 .val = val,
                             });
@@ -317,24 +316,23 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         j_a += 1;
                         j_b += 1;
                     } else if (col_a < col_b) {
-                        _res.val[i].appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
+                        _res.appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
                         j_a += 1;
                     } else { //col_b < col_a
-                        _res.val[i].appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true).neg() });
+                        _res.appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true).neg() });
                         j_b += 1;
                     }
                 }
-                _res.val[i].shrinkAndFree(_res.allocator, _res.entAt(i));
+                _res.shrinkAndFree(res.allocator, _res.len);
                 res.val[i].deinit(res.allocator);
-                res.val[i] = _res.val[i];
+                res.val[i] = _res;
             }
-            _res.allocator.free(_res.val[0.._res.rows]);
         }
 
         fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_pvt: usize, nz_col: []IndexSet) !Element {
             //allocate result
             var res = Row{};
-            try res.ensureTotalCapacity(a.allocator, a.entAt(row_src) + a.entAt(row_trg) - 1);
+            try res.ensureTotalCapacity(a.allocator, a.lenAt(row_src) + a.lenAt(row_trg) - 1);
 
             //get factor for elimination
             const col_pvt = a.colAt(row_src, ind_pvt);
@@ -344,8 +342,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             var i_src: usize = 0;
             var i_trg: usize = 0;
             while (true) {
-                const col_src = if (i_src < a.entAt(row_src)) a.colAt(row_src, i_src) else a.cols;
-                const col_trg = if (i_trg < a.entAt(row_trg)) a.colAt(row_trg, i_trg) else a.cols;
+                const col_src = if (i_src < a.lenAt(row_src)) a.colAt(row_src, i_src) else a.cols;
+                const col_trg = if (i_trg < a.lenAt(row_trg)) a.colAt(row_trg, i_trg) else a.cols;
                 if (col_src == col_trg) {
                     if (col_src == a.cols) break; //end
                     if (col_src != col_pvt) { //skip at pivot column
@@ -410,7 +408,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 defer c.deinit(allocator);
                 for (0..n) |i| {
                     const row = lu.p[i];
-                    for (0..lu.lt.entAt(row)) |j| {
+                    for (0..lu.lt.lenAt(row)) |j| {
                         const col = lu.lt.colAt(row, j);
                         c.set(col, c.at(col).sub(lu.lt.valAt(row, j, true).mul(c.at(row))));
                     }
@@ -423,7 +421,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     const col_diag = lu.q[n - 1 - i];
                     var diag: Element = undefined;
                     var sum = c.at(row);
-                    for (0..lu.u.entAt(row)) |j| {
+                    for (0..lu.u.lenAt(row)) |j| {
                         const col = lu.u.colAt(row, j);
                         if (col == col_diag) {
                             diag = lu.u.valAt(row, j, true);
@@ -505,7 +503,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 nz_col[i] = IndexSet{};
             }
             for (0..n) |i| { //n
-                for (0..u.entAt(i)) |j| { //m
+                for (0..u.lenAt(i)) |j| { //m
                     try nz_col[u.colAt(i, j)].put(allocator, i, undefined); //O(1)
                 }
             }
@@ -521,14 +519,14 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             for (0..n) |i| { //n
                 //get pivot row from queue
                 const row_pvt = row_queue.remove(); //O(log(n))
-                if (u.entAt(row_pvt) == 0) return error.NonInvertible;
+                if (u.lenAt(row_pvt) == 0) return error.NonInvertible;
 
                 //find pivot column O(m)
                 var ind_pvt: usize = undefined;
                 {
                     var nz_pvt: usize = n;
                     var abs_pvt = Element.zero;
-                    for (0..u.entAt(row_pvt)) |j| { //m
+                    for (0..u.lenAt(row_pvt)) |j| { //m
                         const col_j = nz_col[u.colAt(row_pvt, j)].count();
                         const abs_j = u.valAt(row_pvt, j, true).abs();
                         if (col_j < nz_pvt or (col_j == nz_pvt and abs_j.cmp(.gt, abs_pvt))) {
@@ -542,7 +540,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 q[i] = col_pvt;
 
                 //remove pivot row form nonzeros
-                for (0..u.entAt(row_pvt)) |j| {
+                for (0..u.lenAt(row_pvt)) |j| {
                     _ = nz_col[u.colAt(row_pvt, j)].swapRemove(row_pvt);
                 }
 
