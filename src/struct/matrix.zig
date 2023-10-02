@@ -378,8 +378,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
         const LU = struct {
             //PAQ=LU
-            p: [*]usize,
-            q: [*]usize,
+            p: [*]Index,
+            q: [*]Index,
             lt: Matrix,
             u: Matrix,
 
@@ -400,12 +400,14 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 return res;
             }
 
-            pub fn solve(lu: LU, b: Vector, allocator: Allocator) !Vector {
+            pub fn solve(lu: LU, b: Vector, x: Vector) !void {
                 const n = b.len;
+                assert(x.len == n);
+                assert(lu.u.rows == n);
 
                 //apply l-1
-                var c = try b.copy(allocator);
-                defer c.deinit(allocator);
+                var c = try b.copy(lu.u.allocator);
+                defer c.deinit(lu.u.allocator);
                 for (0..n) |i| {
                     const row = lu.p[i];
                     for (0..lu.lt.lenAt(row)) |j| {
@@ -414,7 +416,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     }
                 }
 
-                var x = try Vector.init(n, allocator);
                 //apply u-1
                 for (0..n) |i| {
                     const row = lu.p[n - 1 - i];
@@ -431,7 +432,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     }
                     x.set(col_diag, sum.div(diag));
                 }
-                return x;
             }
         };
 
@@ -450,14 +450,14 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         const SortContext = struct {
             const Self = @This();
             val: IndexSet.DataList,
-            pub fn lessThan(ctx: Self, a_index: usize, b_index: usize) bool {
+            pub fn lessThan(ctx: Self, a_index: Index, b_index: Index) bool {
                 return ctx.val.items(.key)[a_index] < ctx.val.items(.key)[b_index];
             }
         };
 
         const RowPriority = struct {
             const Self = @This();
-            nonzeros: usize,
+            nonzeros: Index,
             norm1: Element,
 
             pub fn from(row: Row) Self {
@@ -488,7 +488,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             errdefer u.deinit();
             var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
             errdefer lt.deinit();
-            var q = try allocator.alloc(usize, n);
+            var q = try allocator.alloc(Index, n);
             errdefer allocator.free(q);
 
             // count nonzeros for each column O(n*m)
@@ -868,8 +868,9 @@ test "matrix LU solve" {
     defer lu.deinit(ally);
 
     //solve
-    var x = try lu.solve(b, ally);
+    var x = try M.Vector.init(n, ally);
     defer x.deinit(ally);
+    try lu.solve(b, x);
 
     //check solve
     var b_ = try M.Vector.init(n, ally);
