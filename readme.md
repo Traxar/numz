@@ -12,12 +12,12 @@ Planned Features:
 
     [x] type of scalars is easily interchangeable.
     [ ] provide truly deterministic decimals.
-    [ ] support complex numbers
+    [x] support complex numbers
     [x] Vectors
         [x] SIMD support
     [x] Permutations
-    [.] Sparse matrices (no SIMD support)
-        [.] LU solver
+    [x] Sparse matrices (no SIMD support)
+        [x] LU solver
     [ ] dense matrices (SIMD support)
         [ ] solver
     [ ] Meshes

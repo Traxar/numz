@@ -29,7 +29,7 @@ pub fn VectorType(comptime Element: type) type {
 
         /// set all elements of a to b
         pub fn fill(res: Vector, a: Element) void {
-            const a_SIMD = SIMDsplat(a);
+            const a_SIMD = SIMDElement.SIMDsplat(a);
             for (0..res.val.len) |i| {
                 res.val[i] = a_SIMD;
             }
@@ -59,19 +59,8 @@ pub fn VectorType(comptime Element: type) type {
             const uSIMDsize = std.meta.Int(.unsigned, SIMDsize);
             //bitcast from int to @vector(bool) reverses the order
             const pred: @Vector(SIMDsize, bool) = @bitCast((@as(uSIMDsize, 1) << @intCast(tail_size)) - 1);
-            inline for (std.meta.fields(Element)) |field| {
-                const field_type = @typeInfo(field.type).Vector.child;
-                @field(a.val[i], field.name) = @select(field_type, pred, @field(a.val[i], field.name), @field(b, field.name));
-            }
-        }
 
-        /// return SIMDElement with all values set to a
-        inline fn SIMDsplat(a: Element) SIMDElement {
-            var res = SIMDElement.init();
-            inline for (std.meta.fields(Element)) |field| {
-                @field(res, field.name) = @splat(@field(a, field.name)[0]);
-            }
-            return res;
+            a.val[i] = a.val[i].SIMDselect(b, pred);
         }
 
         /// return element at index i
@@ -80,11 +69,7 @@ pub fn VectorType(comptime Element: type) type {
             const i_SIMD = @divFloor(i, SIMDsize);
             const a_SIMD = a.val[i_SIMD];
             const i_sub = i - i_SIMD * SIMDsize;
-            var res = Element.init();
-            inline for (std.meta.fields(Element)) |field| {
-                @field(res, field.name) = @bitCast((@field(a_SIMD, field.name)[i_sub]));
-            }
-            return res;
+            return a_SIMD.SIMDat(i_sub);
         }
 
         /// set element at index i to b
@@ -92,9 +77,7 @@ pub fn VectorType(comptime Element: type) type {
             assert(i < a.len);
             const i_SIMD = @divFloor(i, SIMDsize);
             const i_sub = i - i_SIMD * SIMDsize;
-            inline for (std.meta.fields(Element)) |field| {
-                @field(a.val[i_SIMD], field.name)[i_sub] = @bitCast(@field(b, field.name));
-            }
+            a.val[i_SIMD].SIMDset(i_sub, b);
         }
 
         /// res <- a + b
@@ -157,7 +140,7 @@ pub fn VectorType(comptime Element: type) type {
             for (0..a.val.len) |i_SIMD| {
                 res = res.add(a.val[i_SIMD]);
             }
-            return res.SIMDred(.Add);
+            return res.SIMDreduce(.Add);
         }
 
         ///return a . b
@@ -166,7 +149,7 @@ pub fn VectorType(comptime Element: type) type {
             for (0..a.val.len) |i_SIMD| {
                 res = res.add(a.val[i_SIMD].mul(b.val[i_SIMD]));
             }
-            return res.SIMDred(.Add);
+            return res.SIMDreduce(.Add);
         }
 
         ///return the euklidean norm
@@ -176,24 +159,24 @@ pub fn VectorType(comptime Element: type) type {
 
         ///return the smallest element
         pub fn min(a: Vector) Element {
-            a.SIMDsetTail(Vector.SIMDsplat(a.at(0)));
+            a.SIMDsetTail(SIMDElement.SIMDsplat(a.at(0)));
             var res = a.val[0];
             for (1..a.val.len) |i_SIMD| {
                 res = res.min(a.val[i_SIMD]);
             }
             a.SIMDsetTail(SIMDElement.zero);
-            return res.SIMDred(.Min);
+            return res.SIMDreduce(.Min);
         }
 
         ///return the largest element
         pub fn max(a: Vector) Element {
-            a.SIMDsetTail(Vector.SIMDsplat(a.at(0)));
+            a.SIMDsetTail(SIMDElement.SIMDsplat(a.at(0)));
             var res = a.val[0];
             for (1..a.val.len) |i_SIMD| {
                 res = res.max(a.val[i_SIMD]);
             }
             a.SIMDsetTail(SIMDElement.zero);
-            return res.SIMDred(.Max);
+            return res.SIMDreduce(.Max);
         }
 
         pub fn debugprint(self: Vector) void {

@@ -2,7 +2,6 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 const CompareOperator = std.math.CompareOperator;
-const Allocator = std.mem.Allocator;
 
 /// Scalar data structure for computation.
 /// Choose `float` from `{f16, f32, f64, f80, f128}`.
@@ -17,7 +16,7 @@ pub fn Float(comptime float: type) type {
 pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
     assert(size != 0);
     return struct {
-        const Scalar = @This();
+        const Element = @This();
         pub const SIMDsize: usize = size orelse (std.simd.suggestVectorSize(float) orelse 1);
         f: @Vector(SIMDsize, float),
 
@@ -27,84 +26,111 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
         }
 
         /// the 0 element
-        pub const zero = Scalar{ .f = @splat(0) };
+        pub const zero = Element{ .f = @splat(0) };
 
         /// the 1 element
-        pub const eye = Scalar{ .f = @splat(1) };
-
-        /// return scalar with undefined value
-        pub inline fn init() Scalar {
-            return Scalar{ .f = undefined };
-        }
+        pub const eye = Element{ .f = @splat(1) };
 
         /// return element isomorph to p/q
-        pub fn from(p: isize, q: usize) Scalar {
-            assert(q != 0);
-            return Scalar{ .f = @splat(@as(float, @floatFromInt(p)) / @as(float, @floatFromInt(q))) };
+        pub fn from(p: isize, q: usize) Element {
+            assert(SIMDsize == 1);
+            return Element{ .f = @splat(@as(float, @floatFromInt(p)) / @as(float, @floatFromInt(q))) };
         }
 
         /// returns a + b
-        pub inline fn add(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = a.f + b.f };
+        pub inline fn add(a: Element, b: Element) Element {
+            return Element{ .f = a.f + b.f };
         }
 
         /// returns a - b
-        pub inline fn sub(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = a.f - b.f };
+        pub inline fn sub(a: Element, b: Element) Element {
+            return Element{ .f = a.f - b.f };
         }
 
         /// returns a * b
-        pub inline fn mul(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = a.f * b.f };
+        pub inline fn mul(a: Element, b: Element) Element {
+            return Element{ .f = a.f * b.f };
         }
 
         /// returns a / b
-        pub inline fn div(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = a.f / b.f };
+        pub inline fn div(a: Element, b: Element) Element {
+            return Element{ .f = a.f / b.f };
         }
 
         ///returns the minimum of a and b
-        pub inline fn min(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = @min(a.f, b.f) };
+        pub inline fn min(a: Element, b: Element) Element {
+            return Element{ .f = @min(a.f, b.f) };
         }
 
         ///returns the maximum of a and b
-        pub inline fn max(a: Scalar, b: Scalar) Scalar {
-            return Scalar{ .f = @max(a.f, b.f) };
+        pub inline fn max(a: Element, b: Element) Element {
+            return Element{ .f = @max(a.f, b.f) };
         }
 
         /// returns -a
-        pub inline fn neg(a: Scalar) Scalar {
-            return Scalar{ .f = -a.f };
+        pub inline fn neg(a: Element) Element {
+            return Element{ .f = -a.f };
         }
 
-        /// returns |a|
-        pub inline fn abs(a: Scalar) Scalar {
-            return Scalar{ .f = @fabs(a.f) };
+        /// return a^-1
+        pub inline fn inv(a: Element) Element {
+            return Element{ .f = 1 / a.f };
+        }
+
+        /// returns root of a
+        pub inline fn abs(a: Element) Element {
+            return Element{ .f = @fabs(a.f) };
         }
 
         /// returns |√a|
-        pub inline fn sqrt(a: Scalar) Scalar {
-            assert(a.cmp(.gte, Scalar.zero));
-            return Scalar{ .f = @sqrt(a.f) };
+        pub inline fn sqrt(a: Element) Element {
+            assert(a.cmp(.gte, Element.zero));
+            return Element{ .f = @sqrt(a.f) };
         }
 
         /// return log2(a)
-        pub inline fn log2(a: Scalar) Scalar {
-            assert(a.cmp(.gt, Scalar.zero));
-            return Scalar{ .f = @log2(a.f) };
+        pub inline fn log2(a: Element) Element {
+            assert(a.cmp(.gt, Element.zero));
+            return Element{ .f = @log2(a.f) };
+        }
+
+        /// returns true iff a r b holds for all SIMD elements
+        pub inline fn cmp(a: Element, r: CompareOperator, b: Element) bool {
+            return @reduce(.And, a.SIMDcompare(r, b));
+        }
+
+        /// returns SIMD element with all entries set to a
+        pub fn SIMDsplat(a: SIMDType(1)) Element {
+            return Element{ .f = @splat(a.f[0]) };
+        }
+
+        /// returns the element at position i
+        pub fn SIMDat(a: Element, i: usize) SIMDType(1) {
+            return SIMDType(1){ .f = @bitCast(a.f[i]) };
+        }
+
+        /// sets the element at position i to b
+        pub fn SIMDset(a: *Element, i: usize, b: SIMDType(1)) void {
+            a.f[i] = b.f[0];
         }
 
         /// return red(a)
-        pub inline fn SIMDred(a: Scalar, comptime red: std.builtin.ReduceOp) SIMDType(1) {
+        pub inline fn SIMDreduce(a: Element, comptime red: std.builtin.ReduceOp) SIMDType(1) {
             return switch (red) {
-                .Add, .Mul, .Min, .Max => SIMDType(1){ .f = [_]float{@reduce(red, a.f)} },
+                .Add, .Mul, .Min, .Max => SIMDType(1){ .f = @bitCast(@reduce(red, a.f)) },
                 else => unreachable,
             };
         }
 
+        /// returns SIMD element with entries choosen according to c
+        /// if c[i] is true choose a[i]
+        /// else choose b[i]
+        pub fn SIMDselect(a: Element, b: Element, c: @Vector(SIMDsize, bool)) Element {
+            return Element{ .f = @select(float, c, a.f, b.f) };
+        }
+
         /// returns truth value of a r b
-        fn SIMDcmp(a: Scalar, r: CompareOperator, b: Scalar) @Vector(SIMDsize, bool) {
+        inline fn SIMDcompare(a: Element, r: CompareOperator, b: Element) @Vector(SIMDsize, bool) {
             return switch (r) {
                 .eq => a.f == b.f,
                 .lt => a.f < b.f,
@@ -113,11 +139,6 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
                 .gte => a.f >= b.f,
                 .neq => a.f != b.f,
             };
-        }
-
-        /// returns true iff a r b holds for all SIMD elements
-        pub inline fn cmp(a: Scalar, r: CompareOperator, b: Scalar) bool {
-            return @reduce(.And, a.SIMDcmp(r, b));
         }
     };
 }
@@ -187,11 +208,12 @@ test "float comparisons" {
 test "float SIMD" {
     const fTypes = [_]type{ f16, f32, f64, f80, f128 };
     inline for (fTypes) |f| {
-        const F = SIMDFloat(null, f);
-        const a = F.from(-314, 100);
-        const b = F.from(527, 100);
-        const c = F{ .f = a.f + b.f };
+        const F = Float(f);
+        const SIMD_F = F.SIMDType(null);
+        const a = SIMD_F.SIMDsplat(F.from(-314, 100));
+        const b = SIMD_F.SIMDsplat(F.from(527, 100));
+        const c = SIMD_F{ .f = a.f + b.f };
         try testing.expect(c.cmp(.eq, a.add(b)));
-        _ = a.SIMDred(.Add);
+        _ = a.SIMDreduce(.Add);
     }
 }
