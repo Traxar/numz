@@ -214,12 +214,14 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             for (0..a.rows) |i| {
                 for (0..a.lenAt(i)) |j| {
                     const r = a.colAt(i, j);
+                    try _res.val[i].ensureTotalCapacity(res.allocator, @min(res.cols, _res.val[i].len + b.lenAt(r)));
                     for (0..b.lenAt(r)) |k| {
                         const c = b.colAt(r, k);
                         const l = _res.indAt(i, c);
                         try _res.setAt(i, l.ind, l.ex, c, _res.valAt(i, l.ind, l.ex).add(a.valAt(i, j, true).mul(b.valAt(r, k, true))));
                     }
                 }
+                _res.val[i].shrinkAndFree(res.allocator, _res.val[i].len);
             }
             for (0..res.rows) |i| {
                 res.val[i].deinit(res.allocator);

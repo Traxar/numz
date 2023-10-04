@@ -4,6 +4,7 @@ This is a numerics library written in zig.
 
 ToDo:
 
+    * unify init bahaviour of all structs
     * improve comments and doc comments
     * better test checks for vectors and matrices
     * benchmarks 
