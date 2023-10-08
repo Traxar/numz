@@ -30,7 +30,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         /// allocate a nxn matrix with the diagonal set to a
-        pub fn splat(a: Element, n: usize, allocator: Allocator) !Matrix {
+        pub fn from(a: Element, n: usize, allocator: Allocator) !Matrix {
             var res = try zero(n, n, allocator);
             for (0..res.rows) |i| {
                 try res.set(i, i, a);
@@ -371,6 +371,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             }
         }
 
+        const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
+
         fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_pvt: usize, nz_col: []IndexSet) !Element {
             //allocate result
             var res = Row{};
@@ -424,6 +426,116 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             q: [*]Index,
             lt: Matrix,
             u: Matrix,
+
+            const RowPriority = struct {
+                const Self = @This();
+                nonzeros: Index,
+                norm1: Element,
+
+                pub fn from(row: Row) Self {
+                    var row_priority = RowPriority{
+                        .nonzeros = row.len,
+                        .norm1 = Element.zero,
+                    };
+                    for (0..row.len) |j| {
+                        row_priority.norm1 = row_priority.norm1.add(row.items(.val)[j].abs());
+                    }
+                    return row_priority;
+                }
+
+                pub fn before(self: Self, other: Self) bool {
+                    if (self.nonzeros < other.nonzeros) return true;
+                    if (self.nonzeros == other.nonzeros and self.norm1.cmp(.gt, other.norm1)) return true;
+                    return false;
+                }
+            };
+
+            /// O(n*m*(m+log(n)))
+            pub fn from(a: Matrix, allocator: Allocator) !LU {
+                assert(a.rows == a.cols);
+                const n = a.rows;
+
+                //allocating result structs
+                var u = try a.copy(allocator);
+                errdefer u.deinit();
+                var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
+                errdefer lt.deinit();
+                var q = try allocator.alloc(Index, n);
+                errdefer allocator.free(q);
+
+                // count nonzeros for each column O(n*m)
+                var nz_col = try allocator.alloc(IndexSet, n);
+                defer {
+                    for (0..n) |i| {
+                        nz_col[i].deinit(allocator);
+                    }
+                    allocator.free(nz_col);
+                }
+                for (0..n) |i| {
+                    nz_col[i] = IndexSet{};
+                }
+                for (0..n) |i| { //n
+                    for (0..u.lenAt(i)) |j| { //m
+                        try nz_col[u.colAt(i, j)].put(allocator, i, undefined); //O(1)
+                    }
+                }
+
+                //initialize the priority queue for row pivoting
+                var row_queue = try PPQ(RowPriority, RowPriority.before, Index).init(n, allocator); //O(n)
+                errdefer row_queue.deinit(allocator);
+                for (0..n) |i| { //n
+                    row_queue.set(i, RowPriority.from(u.val[i])); //O(log(n)+m)
+                }
+
+                //main loop
+                for (0..n) |i| { //n
+                    //get pivot row from queue
+                    const row_pvt = row_queue.remove(); //O(log(n))
+                    if (u.lenAt(row_pvt) == 0) return error.NonInvertible;
+
+                    //find pivot column O(m)
+                    var ind_pvt: usize = undefined;
+                    {
+                        var nz_pvt: usize = n;
+                        var abs_pvt = Element.zero;
+                        for (0..u.lenAt(row_pvt)) |j| { //m
+                            const nz_j = nz_col[u.colAt(row_pvt, j)].count();
+                            const abs_j = u.valAt(row_pvt, j, true).abs();
+                            if (nz_j < nz_pvt or (nz_j == nz_pvt and abs_j.cmp(.gt, abs_pvt))) {
+                                nz_pvt = nz_j;
+                                abs_pvt = abs_j;
+                                ind_pvt = j;
+                            }
+                        }
+                    }
+                    const col_pvt = u.colAt(row_pvt, ind_pvt);
+                    q[i] = col_pvt;
+
+                    //remove pivot row from nonzeros
+                    for (0..u.lenAt(row_pvt)) |j| {
+                        _ = nz_col[u.colAt(row_pvt, j)].swapRemove(row_pvt);
+                    }
+
+                    //elimination
+                    try lt.val[row_pvt].ensureTotalCapacity(allocator, nz_col[col_pvt].count());
+                    var elim_iter = nz_col[col_pvt].iterator();
+                    while (elim_iter.next()) |entry| { //m
+                        const row_trg = entry.key_ptr.*;
+                        const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col); //O(m)
+                        lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = factor });
+                        row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority //O(log(n))
+                    }
+                }
+                const p = row_queue.deinitToPermutation(allocator);
+                allocator.free(p.inv[0..n]);
+
+                return LU{
+                    .p = p.val,
+                    .q = q.ptr,
+                    .lt = lt,
+                    .u = u,
+                };
+            }
 
             pub fn deinit(lu: LU, allocator: Allocator) void {
                 const n = lu.u.rows;
@@ -487,125 +599,9 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             }
         }
 
-        const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
-
-        const SortContext = struct {
-            const Self = @This();
-            val: IndexSet.DataList,
-            pub fn lessThan(ctx: Self, a_index: Index, b_index: Index) bool {
-                return ctx.val.items(.key)[a_index] < ctx.val.items(.key)[b_index];
-            }
-        };
-
-        const RowPriority = struct {
-            const Self = @This();
-            nonzeros: Index,
-            norm1: Element,
-
-            pub fn from(row: Row) Self {
-                var row_priority = RowPriority{
-                    .nonzeros = row.len,
-                    .norm1 = Element.zero,
-                };
-                for (0..row.len) |j| {
-                    row_priority.norm1 = row_priority.norm1.add(row.items(.val)[j]);
-                }
-                return row_priority;
-            }
-
-            pub fn before(self: Self, other: Self) bool {
-                if (self.nonzeros < other.nonzeros) return true;
-                if (self.nonzeros == other.nonzeros and self.norm1.cmp(.gt, other.norm1)) return true;
-                return false;
-            }
-        };
-
         /// O(n*m*(m+log(n)))
         pub fn decomp(self: Matrix, allocator: Allocator) !LU {
-            assert(self.rows == self.cols);
-            const n = self.rows;
-
-            //allocating result structs
-            var u = try self.copy(allocator);
-            errdefer u.deinit();
-            var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
-            errdefer lt.deinit();
-            var q = try allocator.alloc(Index, n);
-            errdefer allocator.free(q);
-
-            // count nonzeros for each column O(n*m)
-            var nz_col = try allocator.alloc(IndexSet, n);
-            defer {
-                for (0..n) |i| {
-                    nz_col[i].deinit(allocator);
-                }
-                allocator.free(nz_col);
-            }
-            for (0..n) |i| {
-                nz_col[i] = IndexSet{};
-            }
-            for (0..n) |i| { //n
-                for (0..u.lenAt(i)) |j| { //m
-                    try nz_col[u.colAt(i, j)].put(allocator, i, undefined); //O(1)
-                }
-            }
-
-            //initialize the priority queue for row pivoting
-            var row_queue = try PPQ(RowPriority, RowPriority.before, Index).init(n, allocator);
-            errdefer row_queue.deinit(allocator);
-            for (0..n) |i| { //n
-                row_queue.set(i, RowPriority.from(u.val[i])); //O(log(n)+m)
-            }
-
-            //main loop
-            for (0..n) |i| { //n
-                //get pivot row from queue
-                const row_pvt = row_queue.remove(); //O(log(n))
-                if (u.lenAt(row_pvt) == 0) return error.NonInvertible;
-
-                //find pivot column O(m)
-                var ind_pvt: usize = undefined;
-                {
-                    var nz_pvt: usize = n;
-                    var abs_pvt = Element.zero;
-                    for (0..u.lenAt(row_pvt)) |j| { //m
-                        const col_j = nz_col[u.colAt(row_pvt, j)].count();
-                        const abs_j = u.valAt(row_pvt, j, true).abs();
-                        if (col_j < nz_pvt or (col_j == nz_pvt and abs_j.cmp(.gt, abs_pvt))) {
-                            nz_pvt = col_j;
-                            abs_pvt = abs_j;
-                            ind_pvt = j;
-                        }
-                    }
-                }
-                const col_pvt = u.colAt(row_pvt, ind_pvt);
-                q[i] = col_pvt;
-
-                //remove pivot row form nonzeros
-                for (0..u.lenAt(row_pvt)) |j| {
-                    _ = nz_col[u.colAt(row_pvt, j)].swapRemove(row_pvt);
-                }
-
-                //elimination
-                try lt.val[row_pvt].ensureTotalCapacity(allocator, nz_col[col_pvt].count());
-                nz_col[col_pvt].sort(SortContext{ .val = nz_col[col_pvt].entries }); //O(m*log(m)) or O(m^2) ?
-                var elim_iter = nz_col[col_pvt].iterator();
-                while (elim_iter.next()) |entry| { //m
-                    const row_trg = entry.key_ptr.*;
-                    const factor = try u.elimAt(row_pvt, row_trg, ind_pvt, nz_col); //O(m)
-                    lt.val[row_pvt].appendAssumeCapacity(.{ .col = row_trg, .val = factor });
-                    row_queue.set(row_trg, RowPriority.from(u.val[row_trg])); //update priority //O(log(n))
-                }
-            }
-            const p = row_queue.deinitToPermutation(allocator);
-            allocator.free(p.inv[0..n]);
-
-            return LU{
-                .p = p.val,
-                .q = q.ptr,
-                .lt = lt,
-                .u = u,
-            };
+            return LU.from(self, allocator);
         }
     };
 }
@@ -625,7 +621,7 @@ test "matrix creation" {
         }
     }
 
-    var b = try M.splat(F.eye, n, ally);
+    var b = try M.from(F.eye, n, ally);
     defer b.deinit();
     for (0..n) |i| {
         for (0..n) |j| {
@@ -686,7 +682,7 @@ test "matrix mulpiplication with element" {
 
     const n = 3;
     const a_ = F.from(-314, 100);
-    var a = try M.splat(F.eye, n, ally);
+    var a = try M.from(F.eye, n, ally);
     try a.mulE(a_, a);
     defer a.deinit();
     for (0..n) |i| {
@@ -717,13 +713,13 @@ test "matrix mulpiplication with vector" {
     const M = MatrixType(F, usize);
 
     const n = 3;
-    var a = try M.splat(F.eye, n, ally);
+    var a = try M.from(F.eye, n, ally);
     defer a.deinit();
     try a.set(0, 2, F.from(-1, 1));
     try a.set(1, 0, F.from(-1, 1));
     try a.set(2, 1, F.from(-1, 1));
 
-    var v = try V.splat(F.zero, n, ally);
+    var v = try V.from(F.zero, n, ally);
     defer v.deinit(ally);
     v.set(1, F.from(1, 1));
     v.set(2, F.from(2, 1));
@@ -793,7 +789,7 @@ test "matrix multiplication" {
     try a.set(2, 0, F.from(8, 1));
     try a.set(2, 1, F.from(9, 1));
 
-    var b = try M.splat(F.eye, n, ally);
+    var b = try M.from(F.eye, n, ally);
     defer b.deinit();
 
     try b.set(0, 2, F.from(1, 1));
@@ -836,7 +832,7 @@ test "matrix addition and subtraction" {
     try a.set(2, 1, F.from(9, 1));
     try a.set(2, 2, F.from(-1, 1));
 
-    var b = try M.splat(F.eye, 3, ally);
+    var b = try M.from(F.eye, 3, ally);
     defer b.deinit();
 
     try b.set(0, 2, F.from(1, 1));
