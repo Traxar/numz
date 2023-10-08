@@ -37,7 +37,7 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// allocate vector with n elements all set to a
-        pub fn rep(a: Element, n: usize, allocator: Allocator) !Vector {
+        pub fn splat(a: Element, n: usize, allocator: Allocator) !Vector {
             var res = try Vector.init(n, allocator);
             res.fill(a);
             return res;
@@ -196,7 +196,7 @@ test "vector creation" {
     const V = VectorType(F);
 
     const a = F.from(-314, 100);
-    var v = try V.rep(a, n, ally);
+    var v = try V.splat(a, n, ally);
     defer v.deinit(ally);
 
     try testing.expectEqual(@as(usize, n), v.len);
@@ -214,14 +214,14 @@ test "vector operators" {
 
     const a_ = F.from(-314, 100);
     const b_ = F.from(527, 100);
-    var a = try V.rep(a_, n, ally);
+    var a = try V.splat(a_, n, ally);
     defer a.deinit(ally);
     a.set(1, F.zero);
     try testing.expect(a.at(0).cmp(.eq, a_));
     try testing.expect(a.at(1).cmp(.eq, F.zero));
     try testing.expect(a.at(2).cmp(.eq, a_));
 
-    var b = try V.rep(b_, n, ally);
+    var b = try V.splat(b_, n, ally);
     defer b.deinit(ally);
     b.set(0, F.eye);
     try testing.expect(b.at(0).cmp(.eq, F.eye));

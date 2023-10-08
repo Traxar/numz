@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const PermutationType = @import("../../struct.zig").Permutation;
+const PermutationType = @import("../permutation.zig").PermutationType;
 
 /// priorityqueue for given number of elements where the order of the elements popped can be retrieved as a permutation
 pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a: Priority, b: Priority) bool, comptime Index: type) type {

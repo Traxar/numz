@@ -18,22 +18,22 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         ///allocate empty matrix
         pub fn zero(rows: usize, cols: usize, allocator: Allocator) !Matrix {
             var res = Matrix{
-                .val = (try allocator.alloc(Matrix.Row, rows)).ptr,
+                .val = (try allocator.alloc(Row, rows)).ptr,
                 .rows = rows,
                 .cols = cols,
                 .allocator = allocator,
             };
             for (0..res.rows) |i| {
-                res.val[i] = Matrix.Row{};
+                res.val[i] = Row{};
             }
             return res;
         }
 
-        /// allocate the identity matrix (square)
-        pub fn eye(size: usize, allocator: Allocator) !Matrix {
-            var res = try zero(size, size, allocator);
+        /// allocate a nxn matrix with the diagonal set to a
+        pub fn splat(a: Element, n: usize, allocator: Allocator) !Matrix {
+            var res = try zero(n, n, allocator);
             for (0..res.rows) |i| {
-                try res.set(i, i, Element.eye);
+                try res.set(i, i, a);
             }
             return res;
         }
@@ -57,10 +57,27 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
         /// allocate a^T
         /// O(m*n)
-        pub fn transpose(a: Matrix, allocator: Allocator) !Matrix {
-            var res = try zero(a.cols, a.rows, allocator);
-            var nz_col = try allocator.alloc(usize, a.cols);
-            defer allocator.free(nz_col);
+        pub fn transpose(a: Matrix, res: Matrix) !void {
+            assert(a.cols == res.rows);
+            assert(a.rows == res.cols);
+            const inplace = a.val == res.val;
+            var _res: Matrix = undefined;
+            if (inplace) {
+                _res = try zero(a.cols, a.rows, res.allocator);
+            } else {
+                for (0..res.rows) |i| {
+                    res.val[i].deinit(res.allocator);
+                    res.val[i] = Row{};
+                }
+                _res = res;
+            }
+            errdefer {
+                if (inplace) {
+                    _res.deinit();
+                }
+            }
+            var nz_col = try res.allocator.alloc(usize, a.cols);
+            defer res.allocator.free(nz_col);
             for (0..a.cols) |j| {
                 nz_col[j] = 0;
             }
@@ -70,14 +87,20 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 }
             }
             for (0..a.cols) |j| {
-                try res.val[j].ensureTotalCapacity(allocator, nz_col[j]);
+                try _res.val[j].ensureTotalCapacity(res.allocator, nz_col[j]);
             }
             for (0..a.rows) |i| {
                 for (0..a.lenAt(i)) |j| {
-                    res.val[a.colAt(i, j)].appendAssumeCapacity(.{ .col = i, .val = a.valAt(i, j, true) });
+                    _res.val[a.colAt(i, j)].appendAssumeCapacity(.{ .col = i, .val = a.valAt(i, j, true) });
                 }
             }
-            return res;
+            if (inplace) {
+                for (0..res.rows) |i| {
+                    res.val[i].deinit(res.allocator);
+                    res.val[i] = _res.val[i];
+                }
+                _res.allocator.free(_res.val[0.._res.rows]);
+            }
         }
 
         /// return index of col in row
@@ -111,7 +134,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
         /// return element at row and columnIndex
         /// O(1)
-        fn valAt(a: Matrix, row: usize, ind: usize, exists: bool) Element {
+        inline fn valAt(a: Matrix, row: usize, ind: usize, exists: bool) Element {
             if (!exists) {
                 return Element.zero;
             } else {
@@ -121,7 +144,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
         /// return column at row and columnIndex i
         /// O(1)
-        fn colAt(a: Matrix, row: usize, ind: usize) usize {
+        inline fn colAt(a: Matrix, row: usize, ind: usize) usize {
             return a.val[row].items(.col)[ind];
         }
 
@@ -210,7 +233,22 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             assert(a.cols == b.rows);
             assert(res.rows == a.rows);
             assert(res.cols == b.cols);
-            var _res = try zero(a.rows, b.cols, res.allocator);
+            const inplace = a.val == res.val or b.val == res.val;
+            var _res: Matrix = undefined;
+            if (inplace) {
+                _res = try zero(a.rows, b.cols, res.allocator);
+            } else {
+                for (0..res.rows) |i| {
+                    res.val[i].deinit(res.allocator);
+                    res.val[i] = Row{};
+                }
+                _res = res;
+            }
+            errdefer {
+                if (inplace) {
+                    _res.deinit();
+                }
+            }
             for (0..a.rows) |i| {
                 for (0..a.lenAt(i)) |j| {
                     const r = a.colAt(i, j);
@@ -223,11 +261,13 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 }
                 _res.val[i].shrinkAndFree(res.allocator, _res.val[i].len);
             }
-            for (0..res.rows) |i| {
-                res.val[i].deinit(res.allocator);
-                res.val[i] = _res.val[i];
+            if (inplace) {
+                for (0..res.rows) |i| {
+                    res.val[i].deinit(res.allocator);
+                    res.val[i] = _res.val[i];
+                }
+                _res.allocator.free(_res.val[0.._res.rows]);
             }
-            _res.allocator.free(_res.val[0.._res.rows]);
         }
 
         /// res <- a / b
@@ -422,17 +462,17 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 for (0..n) |i| {
                     const row = lu.p[n - 1 - i];
                     const col_diag = lu.q[n - 1 - i];
-                    var diag: Element = undefined;
+                    var elem_diag: Element = undefined;
                     var sum = c.at(row);
                     for (0..lu.u.lenAt(row)) |j| {
                         const col = lu.u.colAt(row, j);
                         if (col == col_diag) {
-                            diag = lu.u.valAt(row, j, true);
+                            elem_diag = lu.u.valAt(row, j, true);
                         } else {
                             sum = sum.sub(lu.u.valAt(row, j, true).mul(x.at(col)));
                         }
                     }
-                    x.set(col_diag, sum.div(diag));
+                    x.set(col_diag, sum.div(elem_diag));
                 }
             }
         };
@@ -481,7 +521,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         };
 
         /// O(n*m*(m+log(n)))
-        pub fn decompLU(self: Matrix, allocator: Allocator) !LU {
+        pub fn decomp(self: Matrix, allocator: Allocator) !LU {
             assert(self.rows == self.cols);
             const n = self.rows;
 
@@ -572,7 +612,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
 test "matrix creation" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     const n = 5;
@@ -585,7 +625,7 @@ test "matrix creation" {
         }
     }
 
-    var b = try M.eye(n, ally);
+    var b = try M.splat(F.eye, n, ally);
     defer b.deinit();
     for (0..n) |i| {
         for (0..n) |j| {
@@ -600,7 +640,7 @@ test "matrix creation" {
 
 test "matrix removing entries" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     var a = try M.zero(3, 3, ally);
@@ -641,12 +681,12 @@ test "matrix removing entries" {
 
 test "matrix mulpiplication with element" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     const n = 3;
     const a_ = F.from(-314, 100);
-    var a = try M.eye(n, ally);
+    var a = try M.splat(F.eye, n, ally);
     try a.mulE(a_, a);
     defer a.deinit();
     for (0..n) |i| {
@@ -672,18 +712,18 @@ test "matrix mulpiplication with element" {
 
 test "matrix mulpiplication with vector" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const V = @import("vector.zig").VectorType(F);
     const M = MatrixType(F, usize);
 
     const n = 3;
-    var a = try M.eye(n, ally);
+    var a = try M.splat(F.eye, n, ally);
     defer a.deinit();
     try a.set(0, 2, F.from(-1, 1));
     try a.set(1, 0, F.from(-1, 1));
     try a.set(2, 1, F.from(-1, 1));
 
-    var v = try V.rep(F.zero, n, ally);
+    var v = try V.splat(F.zero, n, ally);
     defer v.deinit(ally);
     v.set(1, F.from(1, 1));
     v.set(2, F.from(2, 1));
@@ -698,7 +738,7 @@ test "matrix mulpiplication with vector" {
 
 test "matrix transpose" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     var a = try M.zero(3, 3, ally);
@@ -717,23 +757,22 @@ test "matrix transpose" {
     try a.set(2, 0, F.from(8, 1));
     try a.set(2, 1, F.from(9, 1));
 
-    var b = try a.transpose(ally);
-    defer b.deinit();
+    try a.transpose(a);
 
-    try testing.expect(b.at(0, 0).cmp(.eq, F.from(2, 1)));
-    try testing.expect(b.at(1, 0).cmp(.eq, F.from(1, 1)));
-    try testing.expect(b.at(2, 0).cmp(.eq, F.from(3, 1)));
-    try testing.expect(b.at(0, 1).cmp(.eq, F.from(6, 1)));
-    try testing.expect(b.at(1, 1).cmp(.eq, F.from(0, 1)));
-    try testing.expect(b.at(2, 1).cmp(.eq, F.from(5, 1)));
-    try testing.expect(b.at(0, 2).cmp(.eq, F.from(8, 1)));
-    try testing.expect(b.at(1, 2).cmp(.eq, F.from(9, 1)));
-    try testing.expect(b.at(2, 2).cmp(.eq, F.from(7, 1)));
+    try testing.expect(a.at(0, 0).cmp(.eq, F.from(2, 1)));
+    try testing.expect(a.at(1, 0).cmp(.eq, F.from(1, 1)));
+    try testing.expect(a.at(2, 0).cmp(.eq, F.from(3, 1)));
+    try testing.expect(a.at(0, 1).cmp(.eq, F.from(6, 1)));
+    try testing.expect(a.at(1, 1).cmp(.eq, F.from(0, 1)));
+    try testing.expect(a.at(2, 1).cmp(.eq, F.from(5, 1)));
+    try testing.expect(a.at(0, 2).cmp(.eq, F.from(8, 1)));
+    try testing.expect(a.at(1, 2).cmp(.eq, F.from(9, 1)));
+    try testing.expect(a.at(2, 2).cmp(.eq, F.from(7, 1)));
 }
 
 test "matrix multiplication" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     // 2 1 3   1 0 1   2 1 6
@@ -754,7 +793,7 @@ test "matrix multiplication" {
     try a.set(2, 0, F.from(8, 1));
     try a.set(2, 1, F.from(9, 1));
 
-    var b = try M.eye(n, ally);
+    var b = try M.splat(F.eye, n, ally);
     defer b.deinit();
 
     try b.set(0, 2, F.from(1, 1));
@@ -777,7 +816,7 @@ test "matrix multiplication" {
 
 test "matrix addition and subtraction" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     // 2 0 1   1 0 1   3 0 2
@@ -797,7 +836,7 @@ test "matrix addition and subtraction" {
     try a.set(2, 1, F.from(9, 1));
     try a.set(2, 2, F.from(-1, 1));
 
-    var b = try M.eye(3, ally);
+    var b = try M.splat(F.eye, 3, ally);
     defer b.deinit();
 
     try b.set(0, 2, F.from(1, 1));
@@ -838,7 +877,7 @@ test "matrix addition and subtraction" {
 
 test "matrix LU solve" {
     const ally = std.testing.allocator;
-    const F = @import("../struct.zig").Field.Float(f32);
+    const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
     const n = 3;
@@ -866,7 +905,7 @@ test "matrix LU solve" {
     b.set(2, F.from(3, 1));
 
     //decompose
-    const lu = try a.decompLU(ally);
+    const lu = try a.decomp(ally);
     defer lu.deinit(ally);
 
     //solve
@@ -887,8 +926,9 @@ test "matrix LU solve" {
     try testing.expect(F.from(78, 1).cmp(.eq, lu.det()));
 
     //reconstuct a from LU
-    var l = try lu.lt.transpose(ally);
+    const l = try M.zero(n, n, ally);
     defer l.deinit();
+    try lu.lt.transpose(l);
     for (0..3) |i| {
         try l.set(i, i, F.eye);
     }
