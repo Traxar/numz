@@ -13,6 +13,11 @@ pub fn VectorType(comptime Element: type) type {
         val: []SIMDElement,
         len: usize,
 
+        /// deinitialize vector
+        pub fn deinit(a: Vector, allocator: Allocator) void {
+            allocator.free(a.val);
+        }
+
         ///allocate vector with undefined values
         pub fn init(n: usize, allocator: Allocator) !Vector {
             const n_SIMD = 1 + @divFloor(n - 1, SIMDsize); //divCeil
@@ -22,18 +27,9 @@ pub fn VectorType(comptime Element: type) type {
             };
         }
 
-        /// deinitialize vector
-        pub fn deinit(a: Vector, allocator: Allocator) void {
-            allocator.free(a.val);
-        }
-
-        /// set all elements of a to b
-        pub fn fill(res: Vector, a: Element) void {
-            const a_SIMD = SIMDElement.SIMDsplat(a);
-            for (0..res.val.len) |i| {
-                res.val[i] = a_SIMD;
-            }
-            res.SIMDsetTail(SIMDElement.zero);
+        ///allocate vector with undefined values and same dimensions as a
+        pub fn like(a: Vector, allocator: Allocator) !Vector {
+            return init(a.len, allocator);
         }
 
         /// allocate vector with n elements all set to a
@@ -43,12 +39,21 @@ pub fn VectorType(comptime Element: type) type {
             return res;
         }
 
-        /// allocate copy of vector a
-        pub fn copy(a: Vector, allocator: Allocator) !Vector {
-            return Vector{
-                .val = try allocator.dupe(SIMDElement, a.val),
-                .len = a.len,
-            };
+        /// res <- a
+        pub fn copy(a: Vector, res: Vector) void {
+            assert(a.len == res.len);
+            if (a.val.ptr != res.val.ptr) {
+                @memcpy(res.val, a.val);
+            }
+        }
+
+        /// set all elements of a to b
+        pub fn fill(a: Vector, b: Element) void {
+            const b_SIMD = SIMDElement.SIMDsplat(b);
+            for (0..a.val.len) |i| {
+                a.val[i] = b_SIMD;
+            }
+            a.SIMDsetTail(SIMDElement.zero);
         }
 
         /// set tail elements of a to b

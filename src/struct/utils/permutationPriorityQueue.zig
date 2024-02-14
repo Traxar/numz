@@ -67,7 +67,7 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             const child = self.items.at(child_index);
             const child_priority = self.priorities[child];
             while (child_index < self.capacity() - 1) {
-                var parent_index = self.capacity() - ((self.capacity() - child_index) >> 1);
+                const parent_index = self.capacity() - ((self.capacity() - child_index) >> 1);
                 const parent = self.items.at(parent_index);
                 const parent_priority = self.priorities[parent];
                 if (!before(child_priority, parent_priority)) break;

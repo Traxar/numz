@@ -17,7 +17,7 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
     assert(size != 0);
     return struct {
         const Element = @This();
-        pub const SIMDsize: usize = size orelse (std.simd.suggestVectorSize(float) orelse 1);
+        pub const SIMDsize: usize = size orelse (std.simd.suggestVectorLength(float) orelse 1);
         f: @Vector(SIMDsize, float),
 
         /// return a SIMD version of `@This()` with SIMD size `size_`
@@ -79,7 +79,7 @@ pub fn SIMDFloat(comptime size: ?usize, comptime float: type) type {
 
         /// returns root of a
         pub inline fn abs(a: Element) Element {
-            return Element{ .f = @fabs(a.f) };
+            return Element{ .f = @abs(a.f) };
         }
 
         /// returns |√a|
@@ -167,7 +167,7 @@ test "float operators" {
         try testing.expectEqual(a.f * b.f, a.mul(b).f);
         try testing.expectEqual(a.f / b.f, a.div(b).f);
         try testing.expectEqual(b.f / a.f, b.div(a).f);
-        try testing.expectEqual(@fabs(a.f), a.abs().f);
+        try testing.expectEqual(@abs(a.f), a.abs().f);
         try testing.expectEqual(@sqrt(b.f), b.sqrt().f);
         try testing.expectEqual(@log2(b.f), b.log2().f);
 

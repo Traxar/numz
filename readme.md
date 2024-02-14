@@ -1,6 +1,6 @@
 # numz
 
-This is a numerics library written in zig.
+This is a numerics library written in ´zig 0.12.0-dev.2540+776cd673f´
 
 ToDo:
 

@@ -15,6 +15,14 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         cols: Index,
         allocator: Allocator,
 
+        /// deinitialize matrix
+        pub fn deinit(a: Matrix) void {
+            for (0..a.rows) |i| {
+                a.val[i].deinit(a.allocator);
+            }
+            a.allocator.free(a.val[0..a.rows]);
+        }
+
         ///allocate empty matrix
         pub fn zero(rows: usize, cols: usize, allocator: Allocator) !Matrix {
             var res = Matrix{
@@ -29,6 +37,11 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             return res;
         }
 
+        ///allocate empty matrix with same dimensions as a
+        pub fn like(a: Matrix, allocator: Allocator) !Matrix {
+            return zero(a.rows, a.cols, allocator);
+        }
+
         /// allocate a nxn matrix with the diagonal set to a
         pub fn from(a: Element, n: usize, allocator: Allocator) !Matrix {
             var res = try zero(n, n, allocator);
@@ -38,21 +51,16 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             return res;
         }
 
-        /// deinitialize matrix
-        pub fn deinit(a: Matrix) void {
-            for (0..a.rows) |i| {
-                a.val[i].deinit(a.allocator);
+        /// res <- a
+        pub fn copy(a: Matrix, res: Matrix) !void {
+            assert(a.rows == res.rows);
+            assert(a.cols == res.cols);
+            if (a.val != res.val) {
+                for (0..a.rows) |i| {
+                    res.val[i].deinit(res.allocator);
+                    res.val[i] = try a.val[i].clone(res.allocator);
+                }
             }
-            a.allocator.free(a.val[0..a.rows]);
-        }
-
-        /// allocate copy of a
-        pub fn copy(a: Matrix, allocator: Allocator) !Matrix {
-            var res = try zero(a.rows, a.cols, allocator);
-            for (0..a.rows) |i| {
-                res.val[i] = try a.val[i].clone(allocator);
-            }
-            return res;
         }
 
         /// allocate a^T
@@ -426,6 +434,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             q: [*]Index,
             lt: Matrix,
             u: Matrix,
+            buffer: Vector,
 
             const RowPriority = struct {
                 const Self = @This();
@@ -450,14 +459,19 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 }
             };
 
-            /// O(n*m*(m+log(n)))
             pub fn from(a: Matrix, allocator: Allocator) !LU {
-                assert(a.rows == a.cols);
-                const n = a.rows;
+                var u = try a.like(allocator);
+                errdefer u.deinit();
+                try a.copy(u);
+                return try LU.decompose(u, allocator);
+            }
+
+            /// O(n*m*(m+log(n)))
+            pub fn decompose(u: Matrix, allocator: Allocator) !LU {
+                assert(u.rows == u.cols);
+                const n = u.rows;
 
                 //allocating result structs
-                var u = try a.copy(allocator);
-                errdefer u.deinit();
                 var lt = try Matrix.zero(n, n, allocator); //l transpose for faster fill
                 errdefer lt.deinit();
                 var q = try allocator.alloc(Index, n);
@@ -529,12 +543,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 const p = row_queue.deinitToPermutation(allocator);
                 allocator.free(p.inv[0..n]);
 
-                return LU{
-                    .p = p.val,
-                    .q = q.ptr,
-                    .lt = lt,
-                    .u = u,
-                };
+                return LU{ .p = p.val, .q = q.ptr, .lt = lt, .u = u, .buffer = try Vector.init(n, allocator) };
             }
 
             pub fn deinit(lu: LU, allocator: Allocator) void {
@@ -543,6 +552,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 allocator.free(lu.q[0..n]);
                 lu.lt.deinit();
                 lu.u.deinit();
+                lu.buffer.deinit(allocator);
             }
 
             pub fn det(lu: LU) Element {
@@ -560,13 +570,12 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 assert(lu.u.rows == n);
 
                 //apply l-1
-                var c = try b.copy(lu.u.allocator);
-                defer c.deinit(lu.u.allocator);
+                b.copy(lu.buffer);
                 for (0..n) |i| {
                     const row = lu.p[i];
                     for (0..lu.lt.lenAt(row)) |j| {
                         const col = lu.lt.colAt(row, j);
-                        c.set(col, c.at(col).sub(lu.lt.valAt(row, j, true).mul(c.at(row))));
+                        lu.buffer.set(col, lu.buffer.at(col).sub(lu.lt.valAt(row, j, true).mul(lu.buffer.at(row))));
                     }
                 }
 
@@ -575,7 +584,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     const row = lu.p[n - 1 - i];
                     const col_diag = lu.q[n - 1 - i];
                     var elem_diag: Element = undefined;
-                    var sum = c.at(row);
+                    var sum = lu.buffer.at(row);
                     for (0..lu.u.lenAt(row)) |j| {
                         const col = lu.u.colAt(row, j);
                         if (col == col_diag) {
