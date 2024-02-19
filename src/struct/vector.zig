@@ -32,13 +32,6 @@ pub fn VectorType(comptime Element: type) type {
             return init(a.len, allocator);
         }
 
-        /// allocate vector with n elements all set to a
-        pub fn from(a: Element, n: usize, allocator: Allocator) !Vector {
-            var res = try Vector.init(n, allocator);
-            res.fill(a);
-            return res;
-        }
-
         /// res <- a
         pub fn copy(a: Vector, res: Vector) void {
             assert(a.len == res.len);
@@ -48,12 +41,12 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// set all elements of a to b
-        pub fn fill(a: Vector, b: Element) void {
-            const b_SIMD = SIMDElement.SIMDsplat(b);
-            for (0..a.val.len) |i| {
-                a.val[i] = b_SIMD;
+        pub fn fill(res: Vector, a: Element) void {
+            const a_SIMD = SIMDElement.SIMDsplat(a);
+            for (0..res.val.len) |i| {
+                res.val[i] = a_SIMD;
             }
-            a.SIMDsetTail(SIMDElement.zero);
+            res.SIMDsetTail(SIMDElement.zero);
         }
 
         /// set tail elements of a to b
@@ -201,8 +194,9 @@ test "vector creation" {
     const V = VectorType(F);
 
     const a = F.from(-314, 100);
-    var v = try V.from(a, n, ally);
+    var v = try V.init(n, ally);
     defer v.deinit(ally);
+    v.fill(a);
 
     try testing.expectEqual(@as(usize, n), v.len);
 
@@ -219,15 +213,17 @@ test "vector operators" {
 
     const a_ = F.from(-314, 100);
     const b_ = F.from(527, 100);
-    var a = try V.from(a_, n, ally);
+    var a = try V.init(n, ally);
     defer a.deinit(ally);
+    a.fill(a_);
     a.set(1, F.zero);
     try testing.expect(a.at(0).cmp(.eq, a_));
     try testing.expect(a.at(1).cmp(.eq, F.zero));
     try testing.expect(a.at(2).cmp(.eq, a_));
 
-    var b = try V.from(b_, n, ally);
+    var b = try V.init(n, ally);
     defer b.deinit(ally);
+    b.fill(b_);
     b.set(0, F.eye);
     try testing.expect(b.at(0).cmp(.eq, F.eye));
     try testing.expect(b.at(1).cmp(.eq, b_));
