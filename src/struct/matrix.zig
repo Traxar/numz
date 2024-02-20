@@ -6,12 +6,14 @@ const PPQ = @import("utils/permutationPriorityQueue.zig").PermutationPriorityQue
 
 /// struct for matrix operations
 /// Element must be a field
-/// Index must be an unsigned integer, biggest one being usize
+/// Index must be an unsigned integer <= usize
 pub fn MatrixType(comptime Element: type, comptime Index: type) type {
     return struct {
         const Matrix = @This();
         const Vector = @import("vector.zig").VectorType(Element);
-        const Values = std.MultiArrayList(struct { col: Index, val: Element });
+        const Entry = struct { col: Index, val: Element };
+        const MultiArrayList = std.MultiArrayList(Entry);
+        const Values = MultiArrayList.Slice;
         val: *Values,
         //TODO: check usize/Index
         rptr: [*]usize,
@@ -36,7 +38,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 .cols = cols,
                 .allocator = allocator,
             };
-            res.val.* = .{};
+            res.val.* = (MultiArrayList{}).slice();
             @memset(res.rptr[0..r], @as(Index, 0));
             return res;
         }
@@ -51,8 +53,9 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         fn ensureTotalCapacity(a: Matrix, new_capacity: usize) !void {
             if (a.val.capacity < new_capacity) {
                 a.val.deinit(a.allocator);
-                a.val.* = .{};
-                try a.val.setCapacity(a.allocator, new_capacity);
+                var new: MultiArrayList = .{};
+                try new.setCapacity(a.allocator, new_capacity);
+                a.val.* = new.slice();
             }
         }
 
@@ -82,7 +85,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 assert(row > a.row or (row == a.row and col >= a.col)); //input order
                 if (b.cmp(.neq, Element.zero)) {
                     @memset(a.res.rptr[a.row + 1 .. row + 1], a.res.val.len);
-                    a.res.val.insertAssumeCapacity(a.res.val.len, .{ .col = col, .val = b });
+
+                    a.res.appendAssumeCapacity(.{ .col = col, .val = b });
                     a.row = row;
                     a.col = col + 1;
                 }
@@ -160,7 +164,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 for (a.rptr[r]..a.rptr[r + 1]) |i| {
                     const c = a.val.items(.col)[i];
                     const v = a.val.items(.val)[i];
-                    res.val.set(res.rptr[c + 1], .{ .col = @intCast(r), .val = v });
+                    res.val.set(res.rptr[c + 1], .{ .col = @truncate(r), .val = v });
                     res.rptr[c + 1] += 1;
                 }
             }
@@ -239,6 +243,11 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 }
                 res.set(r, sum);
             }
+        }
+
+        inline fn appendAssumeCapacity(a: Matrix, b: Entry) void {
+            a.val.len += 1;
+            a.val.set(a.val.len - 1, b);
         }
 
         /// count nonzeros of a * b
@@ -323,7 +332,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         }
                     }
                     if (sum.cmp(.neq, Element.zero)) {
-                        res.val.appendAssumeCapacity(.{ .col = min, .val = sum });
+                        res.appendAssumeCapacity(.{ .col = min, .val = sum });
                     }
                 }
             }
@@ -376,15 +385,15 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         }
                         const sum = a.val.items(.val)[i_a].add(b.val.items(.val)[i_b]);
                         if (sum.cmp(.neq, Element.zero)) {
-                            res.val.appendAssumeCapacity(.{ .col = c_a, .val = sum });
+                            res.appendAssumeCapacity(.{ .col = c_a, .val = sum });
                         }
                         i_a += 1;
                         i_b += 1;
                     } else if (c_a < c_b) {
-                        res.val.appendAssumeCapacity(.{ .col = c_a, .val = a.val.items(.val)[i_a] });
+                        res.appendAssumeCapacity(.{ .col = c_a, .val = a.val.items(.val)[i_a] });
                         i_a += 1;
                     } else { //col_b < col_a
-                        res.val.appendAssumeCapacity(.{ .col = c_b, .val = b.val.items(.val)[i_b] });
+                        res.appendAssumeCapacity(.{ .col = c_b, .val = b.val.items(.val)[i_b] });
                         i_b += 1;
                     }
                 }
@@ -412,15 +421,15 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         }
                         const sum = a.val.items(.val)[i_a].sub(b.val.items(.val)[i_b]);
                         if (sum.cmp(.neq, Element.zero)) {
-                            res.val.appendAssumeCapacity(.{ .col = c_a, .val = sum });
+                            res.appendAssumeCapacity(.{ .col = c_a, .val = sum });
                         }
                         i_a += 1;
                         i_b += 1;
                     } else if (c_a < c_b) {
-                        res.val.appendAssumeCapacity(.{ .col = c_a, .val = a.val.items(.val)[i_a] });
+                        res.appendAssumeCapacity(.{ .col = c_a, .val = a.val.items(.val)[i_a] });
                         i_a += 1;
                     } else { //col_b < col_a
-                        res.val.appendAssumeCapacity(.{ .col = c_b, .val = b.val.items(.val)[i_b].neg() });
+                        res.appendAssumeCapacity(.{ .col = c_b, .val = b.val.items(.val)[i_b].neg() });
                         i_b += 1;
                     }
                 }
@@ -428,6 +437,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         //TODO: Fragmentation
+
+        const Fragmentation = struct {};
 
         // const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
 
