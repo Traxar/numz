@@ -6,14 +6,15 @@ const PPQ = @import("utils/permutationPriorityQueue.zig").PermutationPriorityQue
 
 /// struct for matrix operations
 /// Element must be a field
-/// Index must be an unsigned integer
+/// Index must be an unsigned integer, biggest one being usize
 pub fn MatrixType(comptime Element: type, comptime Index: type) type {
     return struct {
         const Matrix = @This();
         const Vector = @import("vector.zig").VectorType(Element);
         const Values = std.MultiArrayList(struct { col: Index, val: Element });
         val: *Values,
-        rptr: [*]Index,
+        //TODO: check usize/Index
+        rptr: [*]usize,
         rows: Index,
         cols: Index,
         allocator: Allocator,
@@ -26,11 +27,11 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         ///allocate empty matrix
-        pub fn init(rows: usize, cols: usize, allocator: Allocator) !Matrix {
+        pub fn init(rows: Index, cols: Index, allocator: Allocator) !Matrix {
             const r = rows + 1;
             const res = Matrix{
                 .val = try allocator.create(Values),
-                .rptr = (try allocator.alloc(Index, r)).ptr,
+                .rptr = (try allocator.alloc(usize, r)).ptr,
                 .rows = rows,
                 .cols = cols,
                 .allocator = allocator,
@@ -100,16 +101,18 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             return .{ .res = res };
         }
 
+        const I = struct { ind: usize, ex: bool };
+
         /// return index of row, col in matrix
         /// performs binary search
         /// O(log(m)), O(1) if dense
-        fn indAt(a: Matrix, row: usize, col: usize) struct { ind: usize, ex: bool } {
+        fn indAt(a: Matrix, row: Index, col: Index) I {
             const r = a.val.items(.col)[a.rptr[row]..a.rptr[row + 1]];
             if (r.len == 0) {
                 return .{ .ind = a.rptr[row], .ex = false };
             } else {
-                var min = r.len -| (a.cols - col);
-                var max = @min(r.len - 1, col);
+                var min: Index = @truncate(r.len -| (a.cols - col));
+                var max: Index = @truncate(@min(r.len - 1, col));
                 while (min < max) {
                     const pivot = @divFloor(min + max, 2);
                     if (col <= r[pivot]) {
@@ -157,7 +160,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 for (a.rptr[r]..a.rptr[r + 1]) |i| {
                     const c = a.val.items(.col)[i];
                     const v = a.val.items(.val)[i];
-                    res.val.set(res.rptr[c + 1], .{ .col = r, .val = v });
+                    res.val.set(res.rptr[c + 1], .{ .col = @intCast(r), .val = v });
                     res.rptr[c + 1] += 1;
                 }
             }
@@ -165,7 +168,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
         /// slow way to set element
         /// if possible use Builder instead !!
-        pub fn edit(a: Matrix, row: Index, col: Index, b: Element) void {
+        pub fn edit(a: Matrix, row: Index, col: Index, b: Element) !void {
             const i = a.indAt(row, col);
             if (b.cmp(.eq, Element.zero)) {
                 if (i.ex) {
@@ -197,7 +200,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 if (res.val != a.val) {
                     try res.ensureTotalCapacity(a.val.len);
                     res.val.len = a.val.len;
-                    @memcpy(res.rptr[1 .. res.row + 1], a.rptr[1 .. a.row + 1]);
+                    @memcpy(res.rptr[1 .. res.rows + 1], a.rptr[1 .. a.rows + 1]);
                 }
                 for (0..res.val.len) |i| {
                     res.val.items(.val)[i] = b.mul(a.val.items(.val)[i]);
@@ -238,183 +241,193 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             }
         }
 
-        /// counts nonzeros of a * b
-        /// O(n*m^3)
-        fn nz_mul(a: Matrix, b: Matrix, allocator: Allocator) usize {
+        /// count nonzeros of a * b
+        fn count_mul(a: Matrix, b: Matrix, buf: []Index) !usize {
+            assert(buf.len >= b.rows);
             var n: usize = 0;
-            const buf = try allocator.alloc(Index, b.rows);
-            defer allocator.free(buf);
-            for (0..a.rows) |i| { //n
-                for (a.rptr[i]..a.rptr[i + 1]) |j| { //m
-                    const jj = j - a.rptr[i];
+            for (0..a.rows) |i| {
+                for (a.rptr[i]..a.rptr[i + 1]) |j| {
                     const r = a.val.items(.col)[j];
-                    buf[jj] = b.rptr[r];
+                    buf[r] = b.rptr[r];
                 }
-                for (0..b.cols) |k| { //m^2
+                while (true) {
                     var min = b.cols;
-                    for (a.rptr[i]..a.rptr[i + 1]) |j| { //m
-                        const jj = j - a.rptr[i];
+                    for (a.rptr[i]..a.rptr[i + 1]) |j| {
                         const r = a.val.items(.col)[j];
-                        if (buf[jj] < b.rptr[r + 1]) {
-                            const c = b.val.items(.col)[buf[jj]];
+                        if (buf[r] < b.rptr[r + 1]) {
+                            const c = b.val.items(.col)[buf[r]];
                             if (c < min) {
                                 min = c;
                             }
                         }
                     }
                     if (min == b.cols) {
-                        n += k;
                         break;
                     }
                     for (a.rptr[i]..a.rptr[i + 1]) |j| {
-                        const jj = j - a.rptr[i];
                         const r = a.val.items(.col)[j];
-                        if (buf[jj] < b.rptr[r + 1]) {
-                            const c = b.val.items(.col)[buf[jj]];
+                        if (buf[r] < b.rptr[r + 1]) {
+                            const c = b.val.items(.col)[buf[r]];
                             if (c == min) {
-                                buf[j] += 1;
+                                buf[r] += 1;
                             }
                         }
                     }
+                    n += 1;
                 }
             }
             return n;
         }
 
-        // /// res <- a * b
-        // /// O(n*m^2)
-        // pub fn mul(a: Matrix, b: Matrix, res: Matrix) !void {
-        //     assert(a.cols == b.rows);
-        //     assert(res.rows == a.rows);
-        //     assert(res.cols == b.cols);
-        //     assert(a.val != res.val);
-        //     assert(b.val != res.val);
-        //     for (0..res.rows) |i| {
-        //         res.val[i].len = 0;
-        //     }
+        /// res <- a * b
+        pub fn mul(a: Matrix, b: Matrix, res: Matrix) !void {
+            assert(a.cols == b.rows);
+            assert(res.rows == a.rows);
+            assert(res.cols == b.cols);
+            assert(a.val != res.val);
+            assert(b.val != res.val);
+            const buf = try res.allocator.alloc(Index, b.rows);
+            defer res.allocator.free(buf);
+            try res.ensureTotalCapacity(try a.count_mul(b, buf));
+            res.val.len = 0;
+            for (0..a.rows) |i| {
+                for (a.rptr[i]..a.rptr[i + 1]) |j| {
+                    const r = a.val.items(.col)[j];
+                    buf[r] = b.rptr[r];
+                }
+                while (true) {
+                    var min = b.cols;
+                    for (a.rptr[i]..a.rptr[i + 1]) |j| {
+                        const r = a.val.items(.col)[j];
+                        if (buf[r] < b.rptr[r + 1]) {
+                            const c = b.val.items(.col)[buf[r]];
+                            if (c < min) {
+                                min = c;
+                            }
+                        }
+                    }
+                    if (min == b.cols) {
+                        res.rptr[i + 1] = res.val.len;
+                        break;
+                    }
+                    var sum = Element.zero;
+                    for (a.rptr[i]..a.rptr[i + 1]) |j| {
+                        const r = a.val.items(.col)[j];
+                        if (buf[r] < b.rptr[r + 1]) {
+                            const c = b.val.items(.col)[buf[r]];
+                            const v = b.val.items(.val)[buf[r]];
+                            if (c == min) {
+                                buf[r] += 1;
+                                sum = sum.add(a.val.items(.val)[j].mul(v));
+                            }
+                        }
+                    }
+                    if (sum.cmp(.neq, Element.zero)) {
+                        res.val.appendAssumeCapacity(.{ .col = min, .val = sum });
+                    }
+                }
+            }
+        }
 
-        //     var h = try res.allocator.alloc(usize, a.cols);
-        //     defer res.allocator.free(h);
+        /// count nonzeros of a + b
+        fn count_add(a: Matrix, b: Matrix) usize {
+            var n: usize = 0;
+            for (0..a.rows) |r| {
+                var i_a = a.rptr[r];
+                var i_b = b.rptr[r];
+                while (true) {
+                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else a.cols;
+                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else b.cols;
+                    if (c_a == c_b) {
+                        if (c_a == a.cols) {
+                            break;
+                        }
+                        i_a += 1;
+                        i_b += 1;
+                    } else if (c_a < c_b) {
+                        i_a += 1;
+                    } else { //col_b < col_a
+                        i_b += 1;
+                    }
+                    n += 1;
+                }
+            }
+            return n;
+        }
 
-        //     for (0..a.rows) |i| {
-        //         for (0..a.lenAt(i)) |j| {
-        //             h[j] = 0;
-        //         }
-        //         const nz = count: {
-        //             for (0..res.cols) |nz| {
-        //                 var min: Index = res.cols;
-        //                 for (0..a.lenAt(i)) |j| {
-        //                     const r = a.colAt(i, j);
-        //                     if (h[j] < b.lenAt(r)) {
-        //                         const c = b.colAt(r, h[j]);
-        //                         if (c < min) {
-        //                             min = c;
-        //                         }
-        //                     }
-        //                 }
-        //                 if (min == res.cols) {
-        //                     break :count nz;
-        //                 }
-        //                 for (0..a.lenAt(i)) |j| {
-        //                     const r = a.colAt(i, j);
-        //                     if (h[j] < b.lenAt(r)) {
-        //                         const c = b.colAt(r, h[j]);
-        //                         if (c == min) {
-        //                             h[j] += 1;
-        //                         }
-        //                     }
-        //                 }
-        //             }
-        //             break :count res.cols;
-        //         };
+        /// res <- a + b
+        pub fn add(a: Matrix, b: Matrix, res: Matrix) !void {
+            assert(a.rows == b.rows and a.rows == res.rows);
+            assert(a.cols == b.cols and a.cols == res.cols);
 
-        //         for (0..a.lenAt(i)) |j| {
-        //             const r = a.colAt(i, j);
-        //             try res.val[i].ensureTotalCapacity(res.allocator, @min(res.cols, res.val[i].len + b.lenAt(r)));
-        //             for (0..b.lenAt(r)) |k| {
-        //                 const c = b.colAt(r, k);
-        //                 const l = res.indAt(i, c);
-        //                 try res.setAt(i, l.ind, l.ex, c, res.valAt(i, l.ind, l.ex).add(a.valAt(i, j, true).mul(b.valAt(r, k, true))));
-        //             }
-        //         }
-        //     }
-        // }
+            try res.ensureTotalCapacity(a.count_add(b));
+            res.val.len = 0;
 
-        // /// res <- a - b
-        // /// O(n*m)
-        // pub fn add(a: Matrix, b: Matrix, res: Matrix) !void {
-        //     assert(a.rows == b.rows and a.rows == res.rows);
-        //     assert(a.cols == b.cols and a.cols == res.cols);
-        //     for (0..a.rows) |i| {
-        //         var _res = Row{};
-        //         try _res.ensureTotalCapacity(res.allocator, @min(a.cols, a.lenAt(i) + b.lenAt(i)));
-        //         var j_a: usize = 0;
-        //         var j_b: usize = 0;
-        //         while (true) {
-        //             const col_a = if (j_a < a.lenAt(i)) a.colAt(i, j_a) else a.cols;
-        //             const col_b = if (j_b < b.lenAt(i)) b.colAt(i, j_b) else b.cols;
-        //             if (col_a == col_b) {
-        //                 if (col_a == a.cols) break;
-        //                 const val = a.valAt(i, j_a, true).add(b.valAt(i, j_b, true));
-        //                 if (val.cmp(.neq, Element.zero)) {
-        //                     _res.appendAssumeCapacity(.{
-        //                         .col = col_a,
-        //                         .val = val,
-        //                     });
-        //                 }
-        //                 j_a += 1;
-        //                 j_b += 1;
-        //             } else if (col_a < col_b) {
-        //                 _res.appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
-        //                 j_a += 1;
-        //             } else { //col_b < col_a
-        //                 _res.appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true) });
-        //                 j_b += 1;
-        //             }
-        //         }
-        //         _res.shrinkAndFree(res.allocator, _res.len);
-        //         res.val[i].deinit(res.allocator);
-        //         res.val[i] = _res;
-        //     }
-        // }
+            for (0..a.rows) |r| {
+                var i_a = a.rptr[r];
+                var i_b = b.rptr[r];
+                while (true) {
+                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else a.cols;
+                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else b.cols;
+                    if (c_a == c_b) {
+                        if (c_a == a.cols) {
+                            res.rptr[r + 1] = res.val.len;
+                            break;
+                        }
+                        const sum = a.val.items(.val)[i_a].add(b.val.items(.val)[i_b]);
+                        if (sum.cmp(.neq, Element.zero)) {
+                            res.val.appendAssumeCapacity(.{ .col = c_a, .val = sum });
+                        }
+                        i_a += 1;
+                        i_b += 1;
+                    } else if (c_a < c_b) {
+                        res.val.appendAssumeCapacity(.{ .col = c_a, .val = a.val.items(.val)[i_a] });
+                        i_a += 1;
+                    } else { //col_b < col_a
+                        res.val.appendAssumeCapacity(.{ .col = c_b, .val = b.val.items(.val)[i_b] });
+                        i_b += 1;
+                    }
+                }
+            }
+        }
 
-        // /// res <- a - b
-        // /// O(n*m)
-        // pub fn sub(a: Matrix, b: Matrix, res: Matrix) !void {
-        //     assert(a.rows == b.rows and a.rows == res.rows);
-        //     assert(a.cols == b.cols and a.cols == res.cols);
-        //     for (0..a.rows) |i| {
-        //         var _res = Row{};
-        //         try _res.ensureTotalCapacity(res.allocator, @min(a.cols, a.lenAt(i) + b.lenAt(i)));
-        //         var j_a: usize = 0;
-        //         var j_b: usize = 0;
-        //         while (true) {
-        //             const col_a = if (j_a < a.lenAt(i)) a.colAt(i, j_a) else a.cols;
-        //             const col_b = if (j_b < b.lenAt(i)) b.colAt(i, j_b) else b.cols;
-        //             if (col_a == col_b) {
-        //                 if (col_a == a.cols) break;
-        //                 const val = a.valAt(i, j_a, true).sub(b.valAt(i, j_b, true));
-        //                 if (val.cmp(.neq, Element.zero)) {
-        //                     _res.appendAssumeCapacity(.{
-        //                         .col = col_a,
-        //                         .val = val,
-        //                     });
-        //                 }
-        //                 j_a += 1;
-        //                 j_b += 1;
-        //             } else if (col_a < col_b) {
-        //                 _res.appendAssumeCapacity(.{ .col = col_a, .val = a.valAt(i, j_a, true) });
-        //                 j_a += 1;
-        //             } else { //col_b < col_a
-        //                 _res.appendAssumeCapacity(.{ .col = col_b, .val = b.valAt(i, j_b, true).neg() });
-        //                 j_b += 1;
-        //             }
-        //         }
-        //         _res.shrinkAndFree(res.allocator, _res.len);
-        //         res.val[i].deinit(res.allocator);
-        //         res.val[i] = _res;
-        //     }
-        // }
+        /// res <- a - b
+        pub fn sub(a: Matrix, b: Matrix, res: Matrix) !void {
+            assert(a.rows == b.rows and a.rows == res.rows);
+            assert(a.cols == b.cols and a.cols == res.cols);
+
+            try res.ensureTotalCapacity(a.count_add(b));
+            res.val.len = 0;
+
+            for (0..a.rows) |r| {
+                var i_a = a.rptr[r];
+                var i_b = b.rptr[r];
+                while (true) {
+                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else a.cols;
+                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else b.cols;
+                    if (c_a == c_b) {
+                        if (c_a == a.cols) {
+                            res.rptr[r + 1] = res.val.len;
+                            break;
+                        }
+                        const sum = a.val.items(.val)[i_a].sub(b.val.items(.val)[i_b]);
+                        if (sum.cmp(.neq, Element.zero)) {
+                            res.val.appendAssumeCapacity(.{ .col = c_a, .val = sum });
+                        }
+                        i_a += 1;
+                        i_b += 1;
+                    } else if (c_a < c_b) {
+                        res.val.appendAssumeCapacity(.{ .col = c_a, .val = a.val.items(.val)[i_a] });
+                        i_a += 1;
+                    } else { //col_b < col_a
+                        res.val.appendAssumeCapacity(.{ .col = c_b, .val = b.val.items(.val)[i_b].neg() });
+                        i_b += 1;
+                    }
+                }
+            }
+        }
+
+        //TODO: Fragmentation
 
         // const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
 
@@ -699,7 +712,7 @@ test "matrix builder" {
 test "matrix transpose" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
 
     const a = try M.init(3, 4, ally);
     defer a.deinit();
@@ -708,7 +721,7 @@ test "matrix transpose" {
     for (0..3) |i| {
         for (0..4) |j| {
             if (j >= i) {
-                a_.set(i, j, F.from(c, 1));
+                a_.set(@intCast(i), @intCast(j), F.from(c, 1));
                 c += 1;
             }
         }
@@ -722,48 +735,102 @@ test "matrix transpose" {
     for (0..3) |i| {
         for (0..4) |j| {
             if (j >= i) {
-                try testing.expectEqual(F.from(c, 1), b.at(j, i));
+                try testing.expectEqual(F.from(c, 1), b.at(@intCast(j), @intCast(i)));
                 c += 1;
             }
         }
     }
 }
 
-// test "matrix transpose" {
-//     const ally = std.testing.allocator;
-//     const F = @import("field.zig").Float(f32);
-//     const M = MatrixType(F, usize);
+test "matrix multiplication" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, usize);
 
-//     var a = try M.init(3, 3, ally);
-//     defer a.deinit();
-//     // 2 1 3
-//     // 6 0 5
-//     // 8 9 7
+    // 1 2 3   1 0-1   1 5 0
+    // 0 4 5 * 0 1-1 = 0 9 1
+    // 0 0 6   0 1 1   0 6 6
 
-//     try a.set(0, 1, F.from(1, 1));
-//     try a.set(0, 0, F.from(2, 1));
-//     try a.set(0, 2, F.from(3, 1));
-//     try a.set(1, 1, F.zero);
-//     try a.set(1, 2, F.from(5, 1));
-//     try a.set(1, 0, F.from(6, 1));
-//     try a.set(2, 2, F.from(7, 1));
-//     try a.set(2, 0, F.from(8, 1));
-//     try a.set(2, 1, F.from(9, 1));
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(6);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 1, F.from(4, 1));
+    a_.set(1, 2, F.from(5, 1));
+    a_.set(2, 2, F.from(6, 1));
+    a_.fin();
 
-//     const aT = try a.like(ally);
-//     defer aT.deinit();
-//     try a.transpose(aT);
+    const b = try M.init(n, n, ally);
+    defer b.deinit();
+    var b_ = try b.build(6);
+    b_.set(0, 0, F.from(1, 1));
+    b_.set(0, 2, F.from(-1, 1));
+    b_.set(1, 1, F.from(1, 1));
+    b_.set(1, 2, F.from(-1, 1));
+    b_.set(2, 1, F.from(1, 1));
+    b_.set(2, 2, F.from(1, 1));
+    b_.fin();
 
-//     try testing.expect(aT.at(0, 0).cmp(.eq, F.from(2, 1)));
-//     try testing.expect(aT.at(1, 0).cmp(.eq, F.from(1, 1)));
-//     try testing.expect(aT.at(2, 0).cmp(.eq, F.from(3, 1)));
-//     try testing.expect(aT.at(0, 1).cmp(.eq, F.from(6, 1)));
-//     try testing.expect(aT.at(1, 1).cmp(.eq, F.from(0, 1)));
-//     try testing.expect(aT.at(2, 1).cmp(.eq, F.from(5, 1)));
-//     try testing.expect(aT.at(0, 2).cmp(.eq, F.from(8, 1)));
-//     try testing.expect(aT.at(1, 2).cmp(.eq, F.from(9, 1)));
-//     try testing.expect(aT.at(2, 2).cmp(.eq, F.from(7, 1)));
-// }
+    var c = try M.init(n, n, ally);
+    defer c.deinit();
+    try a.mul(b, c);
+
+    try testing.expect(c.val.capacity == 7);
+    try testing.expect(c.val.len == 6);
+    try testing.expectEqual(F.from(1, 1), c.at(0, 0));
+    try testing.expectEqual(F.from(5, 1), c.at(0, 1));
+    try testing.expectEqual(F.from(0, 1), c.at(0, 2));
+    try testing.expectEqual(F.from(0, 1), c.at(1, 0));
+    try testing.expectEqual(F.from(9, 1), c.at(1, 1));
+    try testing.expectEqual(F.from(1, 1), c.at(1, 2));
+    try testing.expectEqual(F.from(0, 1), c.at(2, 0));
+    try testing.expectEqual(F.from(6, 1), c.at(2, 1));
+    try testing.expectEqual(F.from(6, 1), c.at(2, 2));
+}
+
+test "matrix addition" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, usize);
+
+    // 1 2 3   1 0 0   0 2 3
+    // 0 0 4 - 2 0 0 =-2 0 4
+    // 0 0 0   3 4 0  -3-4 0
+
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(6);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 2, F.from(4, 1));
+    a_.fin();
+
+    const b = try M.init(n, n, ally);
+    defer b.deinit();
+    try a.transpose(b);
+    try b.mulE(F.from(-1, 1), b);
+
+    var c = try M.init(n, n, ally);
+    defer c.deinit();
+    try a.add(b, c);
+
+    try testing.expect(c.val.capacity == 7);
+    try testing.expect(c.val.len == 6);
+    try testing.expectEqual(F.from(0, 1), c.at(0, 0));
+    try testing.expectEqual(F.from(2, 1), c.at(0, 1));
+    try testing.expectEqual(F.from(3, 1), c.at(0, 2));
+    try testing.expectEqual(F.from(-2, 1), c.at(1, 0));
+    try testing.expectEqual(F.from(0, 1), c.at(1, 1));
+    try testing.expectEqual(F.from(4, 1), c.at(1, 2));
+    try testing.expectEqual(F.from(-3, 1), c.at(2, 0));
+    try testing.expectEqual(F.from(-4, 1), c.at(2, 1));
+    try testing.expectEqual(F.from(0, 1), c.at(2, 2));
+}
 
 // test "matrix mulpiplication with element" {
 //     const ally = std.testing.allocator;
