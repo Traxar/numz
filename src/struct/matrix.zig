@@ -8,17 +8,21 @@ const PPQ = @import("utils/permutationPriorityQueue.zig").PermutationPriorityQue
 /// Element must be a field
 /// Index must be an unsigned integer <= usize
 pub fn MatrixType(comptime Element: type, comptime Index: type) type {
+    //TODO: assertions for Index type
     return struct {
         const Matrix = @This();
         const Vector = @import("vector.zig").VectorType(Element);
+
         const Entry = struct { col: Index, val: Element };
         const MultiArrayList = std.MultiArrayList(Entry);
-        const Values = MultiArrayList.Slice;
-        val: *Values,
-        //TODO: check usize/Index
-        rptr: [*]usize,
+        const MultiSlice = MultiArrayList.Slice;
+        const max_index = ~@as(Index, 0);
+
         rows: Index,
         cols: Index,
+        rptr: [*]usize,
+        val: *MultiSlice,
+        //TODO: check usize/Index
         allocator: Allocator,
 
         /// deinitialize matrix
@@ -31,9 +35,12 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         ///allocate empty matrix
         pub fn init(rows: Index, cols: Index, allocator: Allocator) !Matrix {
             const r = rows + 1;
+            const val = try allocator.create(MultiSlice);
+            errdefer allocator.destroy(val);
+            const rptr = try allocator.alloc(usize, r);
             const res = Matrix{
-                .val = try allocator.create(Values),
-                .rptr = (try allocator.alloc(usize, r)).ptr,
+                .val = val,
+                .rptr = rptr.ptr,
                 .rows = rows,
                 .cols = cols,
                 .allocator = allocator,
@@ -68,7 +75,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 res.val.len = a.val.len;
                 @memcpy(res.val.items(.col), a.val.items(.col));
                 @memcpy(res.val.items(.val), a.val.items(.val));
-                const r = res.row + 1;
+                const r = res.rows + 1;
                 @memcpy(res.rptr[1..r], a.rptr[1..r]);
             }
         }
@@ -252,7 +259,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
         /// count nonzeros of a * b
         fn count_mul(a: Matrix, b: Matrix, buf: []Index) !usize {
-            assert(buf.len >= b.rows);
             var n: usize = 0;
             for (0..a.rows) |i| {
                 for (a.rptr[i]..a.rptr[i + 1]) |j| {
@@ -376,10 +382,10 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 var i_a = a.rptr[r];
                 var i_b = b.rptr[r];
                 while (true) {
-                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else a.cols;
-                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else b.cols;
+                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else max_index;
+                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else max_index;
                     if (c_a == c_b) {
-                        if (c_a == a.cols) {
+                        if (c_a == max_index) {
                             res.rptr[r + 1] = res.val.len;
                             break;
                         }
@@ -412,10 +418,10 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 var i_a = a.rptr[r];
                 var i_b = b.rptr[r];
                 while (true) {
-                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else a.cols;
-                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else b.cols;
+                    const c_a = if (i_a < a.rptr[r + 1]) a.val.items(.col)[i_a] else max_index;
+                    const c_b = if (i_b < b.rptr[r + 1]) b.val.items(.col)[i_b] else max_index;
                     if (c_a == c_b) {
-                        if (c_a == a.cols) {
+                        if (c_a == max_index) {
                             res.rptr[r + 1] = res.val.len;
                             break;
                         }
@@ -436,58 +442,187 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             }
         }
 
-        //TODO: Fragmentation
+        const Solver = struct {
+            const IndexSet = std.AutoArrayHashMapUnmanaged(Index, void);
+            min_ptr: *Index,
+            max_ptr: *Index,
+            val: []MultiSlice,
+            nzs: []IndexSet,
+            buf: MultiSlice,
+            allocator: Allocator,
 
-        const Fragmentation = struct {};
+            pub fn from(a: Matrix, allocator: Allocator) !Solver {
+                const val = try allocator.alloc(MultiSlice, a.rows);
+                errdefer a.allocator.free(val);
+                const nzs = try allocator.alloc(IndexSet, a.cols);
+                errdefer a.allocator.free(nzs);
+                var res = .{
+                    .min_ptr = &a.val.items(.col)[0],
+                    .max_ptr = &a.val.items(.col)[a.val.len - 1],
+                    .val = val,
+                    .nzs = nzs,
+                    .buf = (MultiArrayList{}).slice(),
+                    .allocator = allocator,
+                };
+                const col_ptr: [*]Index = @ptrCast(@alignCast(a.val.ptrs[0]));
+                const val_ptr: [*]Index = @ptrCast(@alignCast(a.val.ptrs[1]));
+                @memset(res.nzs, IndexSet{});
+                for (0..a.rows) |i| {
+                    res.val[i].len = a.rptr[i + 1] - a.rptr[i];
+                    res.val[i].capacity = res.val[i].len;
+                    res.val[i].ptrs[0] = @ptrCast(@alignCast(&col_ptr[a.rptr[i]]));
+                    res.val[i].ptrs[1] = @ptrCast(@alignCast(&val_ptr[a.rptr[i]]));
+                    for (a.rptr[i]..a.rptr[i + 1]) |j| {
+                        res.nzs[a.val.items(.col)[j]].entries.len += 1;
+                    }
+                }
+                for (0..a.cols) |i| {
+                    const cap = res.nzs[i].entries.len;
+                    res.nzs[i].entries.len = 0;
+                    try res.nzs[i].ensureTotalCapacity(a.allocator, cap);
+                    errdefer res.nzs[i].deinit(a.allocator);
+                }
+                for (0..a.rows) |i| {
+                    for (a.rptr[i]..a.rptr[i + 1]) |j| {
+                        res.nzs[a.val.items(.col)[j]].putAssumeCapacity(i, undefined);
+                    }
+                }
+                return res;
+            }
 
-        // const IndexSet = std.AutoArrayHashMapUnmanaged(usize, void);
+            inline fn readOnly(a: *Solver, slice: MultiSlice) bool {
+                if (slice.capacity == 0) return true; //since deinitializing at cap 0 causes segfaults
+                const ptr: *Index = &slice.items(.col)[0];
+                return @intFromPtr(a.min_ptr) <= @intFromPtr(ptr) and @intFromPtr(ptr) <= @intFromPtr(a.max_ptr);
+            }
 
-        // fn elimAt(a: Matrix, row_src: usize, row_trg: usize, ind_pvt: usize, nz_col: []IndexSet) !Element {
-        //     //allocate result
-        //     var res = Row{};
-        //     try res.ensureTotalCapacity(a.allocator, a.lenAt(row_src) + a.lenAt(row_trg) - 1);
+            fn ensureBufferCapacity(a: *Solver, new_capacity: usize) !void {
+                const r = a.readOnly(a.buf);
+                if (r or a.buf.capacity < new_capacity) {
+                    if (!r) a.buf.deinit(a.allocator);
+                    var new: MultiArrayList = .{};
+                    try new.setCapacity(a.allocator, new_capacity);
+                    a.buf = new.slice();
+                }
+            }
 
-        //     //get factor for elimination
-        //     const col_pvt = a.colAt(row_src, ind_pvt);
-        //     const factor = a.at(row_trg, col_pvt).div(a.valAt(row_src, ind_pvt, true)).neg();
+            pub fn deinit(a: *Solver) void {
+                for (0..a.val.len) |i| {
+                    if (!a.readOnly(a.val[i])) {
+                        a.val[i].deinit(a.allocator);
+                    }
+                }
+                a.allocator.free(a.val);
+                for (0..a.nzs.len) |i| {
+                    a.nzs[i].deinit(a.allocator);
+                }
+                a.allocator.free(a.nzs);
+                if (!a.readOnly(a.buf)) {
+                    a.buf.deinit(a.allocator);
+                }
+                a.* = undefined;
+            }
 
-        //     //main loop
-        //     var i_src: usize = 0;
-        //     var i_trg: usize = 0;
-        //     while (true) {
-        //         const col_src = if (i_src < a.lenAt(row_src)) a.colAt(row_src, i_src) else a.cols;
-        //         const col_trg = if (i_trg < a.lenAt(row_trg)) a.colAt(row_trg, i_trg) else a.cols;
-        //         if (col_src == col_trg) {
-        //             if (col_src == a.cols) break; //end
-        //             if (col_src != col_pvt) { //skip at pivot column
-        //                 const val = a.valAt(row_trg, i_trg, true).add(factor.mul(a.valAt(row_src, i_src, true)));
-        //                 if (val.cmp(.neq, Element.zero)) {
-        //                     res.appendAssumeCapacity(.{
-        //                         .col = col_src,
-        //                         .val = val,
-        //                     });
-        //                 } else {
-        //                     _ = nz_col[col_trg].swapRemove(row_trg);
-        //                 }
-        //             }
-        //             i_src += 1;
-        //             i_trg += 1;
-        //         } else if (col_src < col_trg) {
-        //             res.appendAssumeCapacity(.{ .col = col_src, .val = factor.mul(a.valAt(row_src, i_src, true)) });
-        //             try nz_col[col_trg].put(a.allocator, row_trg, undefined);
-        //             i_src += 1;
-        //         } else { //col_b < col_a
-        //             res.appendAssumeCapacity(.{ .col = col_trg, .val = a.valAt(row_trg, i_trg, true) });
-        //             i_trg += 1;
-        //         }
-        //     }
-        //     res.shrinkAndFree(a.allocator, res.len);
+            /// return index of row, col in matrix
+            /// performs binary search
+            /// O(log(m)), O(1) if dense
+            /// TODO: refactor with Matrix.indAt
+            fn indAt(a: Solver, row: Index, col: Index) Index {
+                const r = a.val[row].items(.col);
+                if (r.len == 0) {
+                    return 0;
+                } else {
+                    var min: Index = @truncate(r.len -| (a.nzs.len - col));
+                    var max: Index = @truncate(@min(r.len - 1, col));
+                    while (min < max) {
+                        const pivot = @divFloor(min + max, 2);
+                        if (col <= r[pivot]) {
+                            max = pivot;
+                        } else {
+                            min = pivot + 1;
+                        }
+                    }
+                    return min;
+                }
+            }
 
-        //     //replace row
-        //     a.val[row_trg].deinit(a.allocator);
-        //     a.val[row_trg] = res;
-        //     return factor.neg();
-        // }
+            /// count nonzeros of eliminated row
+            /// TODO: refactor with Matrix
+            fn count_elim(a: Solver, src_row: Index, trg_row: Index) usize {
+                var n: Index = 0;
+                var i_src: Index = 0;
+                var i_trg: Index = 0;
+                while (true) {
+                    const c_src = if (i_src < a.val[src_row].len) a.val[src_row].items(.col)[i_src] else max_index;
+                    const c_trg = if (i_trg < a.val[trg_row].len) a.val[trg_row].items(.col)[i_trg] else max_index;
+                    if (c_src == c_trg) {
+                        if (c_src == max_index) {
+                            break;
+                        }
+                        i_src += 1;
+                        i_trg += 1;
+                    } else if (c_src < c_trg) {
+                        i_src += 1;
+                    } else { //col_b < col_a
+                        i_trg += 1;
+                    }
+                    n += 1;
+                }
+                return n - 1;
+            }
+
+            /// eliminate entry in traget row and col using the source row
+            /// TODO: refactor with Matrix
+            fn elim(a: *Solver, row_src: Index, row_trg: Index, ind_src: Index) !void {
+                try a.ensureBufferCapacity(a.count_elim(row_src, row_trg));
+                a.buf.len = 0;
+
+                const vals_src = a.val[row_src].items(.val);
+                const vals_trg = a.val[row_trg].items(.val);
+                const cols_src = a.val[row_src].items(.col);
+                const cols_trg = a.val[row_trg].items(.col);
+
+                const col_pvt = cols_src[ind_src];
+                const ind_trg = a.indAt(row_trg, col_pvt);
+                const factor = vals_trg[ind_trg].div(vals_src[ind_src]).neg();
+
+                // TODO: buf <- trg + factor * src
+                var i_src: Index = 0;
+                var i_trg: Index = 0;
+                while (true) {
+                    const col_src = if (i_src < a.val[row_src].len) cols_src[i_src] else max_index;
+                    const col_trg = if (i_trg < a.val[row_trg].len) cols_trg[i_trg] else max_index;
+                    if (col_src == col_trg) {
+                        if (col_src == max_index) break; //end
+                        if (col_src != col_pvt) { //skip at pivot column
+                            const val = vals_trg[i_trg].add(factor.mul(vals_src[i_src]));
+                            if (val.cmp(.neq, Element.zero)) {
+                                a.buf.len += 1;
+                                a.buf.set(a.buf.len - 1, .{ .col = col_src, .val = val });
+                            } else {
+                                _ = a.nzs[col_trg].swapRemove(row_trg);
+                            }
+                        }
+                        i_src += 1;
+                        i_trg += 1;
+                    } else if (col_src < col_trg) {
+                        a.buf.len += 1;
+                        a.buf.set(a.buf.len - 1, .{ .col = col_src, .val = factor.mul(vals_src[i_src]) });
+                        try a.nzs[col_trg].put(a.allocator, row_trg, undefined);
+                        i_src += 1;
+                    } else { //col_b < col_a
+                        a.buf.len += 1;
+                        a.buf.set(a.buf.len - 1, .{ .col = col_src, .val = vals_trg[i_trg] });
+                        i_trg += 1;
+                    }
+                }
+
+                // swap buf and trg
+                const helper = a.buf;
+                a.buf = a.val[row_trg];
+                a.val[row_trg] = helper;
+            }
+        };
 
         // const LU = struct {
         //     //PAQ=LU
@@ -814,7 +949,7 @@ test "matrix addition" {
     const n = 3;
     const a = try M.init(n, n, ally);
     defer a.deinit();
-    var a_ = try a.build(6);
+    var a_ = try a.build(4);
     a_.set(0, 0, F.from(1, 1));
     a_.set(0, 1, F.from(2, 1));
     a_.set(0, 2, F.from(3, 1));
@@ -841,6 +976,35 @@ test "matrix addition" {
     try testing.expectEqual(F.from(-3, 1), c.at(2, 0));
     try testing.expectEqual(F.from(-4, 1), c.at(2, 1));
     try testing.expectEqual(F.from(0, 1), c.at(2, 2));
+}
+
+test "matrix fragmentation" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, usize);
+
+    // 1 2 3
+    // 0 0 4
+    // 0 0 0
+
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(4);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 2, F.from(4, 1));
+    a_.fin();
+
+    var s = try M.Solver.from(a, ally);
+    defer s.deinit();
+
+    try testing.expect(s.count_elim(0, 1) == 2);
+
+    try s.elim(1, 0, 0);
+
+    try testing.expect(s.val[0].len == 2);
 }
 
 // test "matrix mulpiplication with element" {
