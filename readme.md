@@ -4,6 +4,7 @@ This is a numerics library written in `zig 0.12.0-dev.2540+776cd673f`
 
 ToDo:
 
+    * restore LU Solver
     * unify init bahaviour of all structs
     * improve comments and doc comments
     * better test checks for vectors and matrices
@@ -18,7 +19,7 @@ Planned Features:
         [x] SIMD support
     [x] Permutations
     [x] Sparse matrices (no SIMD support)
-        [x] LU solver
+        [-] LU solver (temporarily regressed)
     [ ] dense matrices (SIMD support)
         [ ] solver
     [ ] Meshes

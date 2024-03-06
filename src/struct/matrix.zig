@@ -230,7 +230,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 if (res.val != a.val) {
                     try res.ensureTotalCapacity(a.val.len);
                     res.val.len = a.val.len;
-                    @memcpy(res.rptr[1 .. res.row + 1], a.rptr[1 .. a.row + 1]);
+                    @memcpy(res.rptr[1 .. res.rows + 1], a.rptr[1 .. a.rows + 1]);
                 }
                 for (0..res.val.len) |i| {
                     res.val.items(.val)[i] = a.val.items(.val)[i].div(b);
@@ -1007,172 +1007,72 @@ test "matrix fragmentation" {
     try testing.expect(s.val[0].len == 2);
 }
 
-// test "matrix mulpiplication with element" {
-//     const ally = std.testing.allocator;
-//     const F = @import("field.zig").Float(f32);
-//     const M = MatrixType(F, usize);
+test "matrix multiplication with element" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, usize);
 
-//     const n = 3;
-//     const a_ = F.from(-314, 100);
-//     var a = try M.init(n, n, ally);
-//     defer a.deinit();
-//     try a.diag(F.eye);
-//     try a.mulE(a_, a);
-//     for (0..n) |i| {
-//         for (0..n) |j| {
-//             if (i == j) {
-//                 try testing.expect(a.at(i, j).cmp(.eq, a_));
-//             } else {
-//                 try testing.expect(a.at(i, j).cmp(.eq, F.zero));
-//             }
-//         }
-//     }
-//     try a.divE(a_, a);
-//     for (0..n) |i| {
-//         for (0..n) |j| {
-//             if (i == j) {
-//                 try testing.expect(a.at(i, j).cmp(.eq, a_.div(a_)));
-//             } else {
-//                 try testing.expect(a.at(i, j).cmp(.eq, F.zero));
-//             }
-//         }
-//     }
-// }
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(n);
+    for (0..n) |i| {
+        a_.set(i, i, F.eye);
+    }
+    a_.fin();
+    const b = F.from(-314, 100);
 
-// test "matrix mulpiplication with vector" {
-//     const ally = std.testing.allocator;
-//     const F = @import("field.zig").Float(f32);
-//     const V = @import("vector.zig").VectorType(F);
-//     const M = MatrixType(F, usize);
+    a.mulE(b, a) catch unreachable; //since inplace
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try testing.expect(a.at(i, j).cmp(.eq, if (i == j) b else F.zero));
+        }
+    }
 
-//     const n = 3;
-//     var a = try M.init(n, n, ally);
-//     defer a.deinit();
-//     try a.diag(F.eye);
-//     try a.set(0, 2, F.from(-1, 1));
-//     try a.set(1, 0, F.from(-1, 1));
-//     try a.set(2, 1, F.from(-1, 1));
+    a.divE(b, a) catch unreachable; //since inplace
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try testing.expect(a.at(i, j).cmp(.eq, if (i == j) F.eye else F.zero));
+        }
+    }
+}
 
-//     var v = try V.init(n, ally);
-//     defer v.deinit(ally);
-//     v.set(0, F.zero);
-//     v.set(1, F.from(1, 1));
-//     v.set(2, F.from(2, 1));
+test "matrix mulpiplication with vector" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const V = @import("vector.zig").VectorType(F);
+    const M = MatrixType(F, usize);
 
-//     var av = try V.init(n, ally);
-//     defer av.deinit(ally);
-//     a.mulV(v, av);
-//     try testing.expect(av.at(0).cmp(.eq, F.from(-2, 1)));
-//     try testing.expect(av.at(1).cmp(.eq, F.from(1, 1)));
-//     try testing.expect(av.at(2).cmp(.eq, F.from(1, 1)));
-// }
+    // 1 2 3   -2   -1
+    // 0 4 5 * -1 =  1
+    // 0 0 6    1    6
 
-// test "matrix multiplication" {
-//     const ally = std.testing.allocator;
-//     const F = @import("field.zig").Float(f32);
-//     const M = MatrixType(F, usize);
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(6);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 1, F.from(4, 1));
+    a_.set(1, 2, F.from(5, 1));
+    a_.set(2, 2, F.from(6, 1));
+    a_.fin();
 
-//     // 2 1 3   1 0 1   2 1 6
-//     // 6 0 5 * 0 1 1 = 6 0 11
-//     // 8 9 7   0 0 1   8 9 24
+    const b = try V.init(n, ally);
+    defer b.deinit(ally);
+    b.set(0, F.from(-2, 1));
+    b.set(1, F.from(-1, 1));
+    b.set(2, F.from(1, 1));
 
-//     const n = 3;
-//     var a = try M.init(n, n, ally);
-//     defer a.deinit();
+    const c = try V.init(n, ally);
+    defer c.deinit(ally);
+    a.mulV(b, c);
 
-//     try a.set(0, 1, F.from(1, 1));
-//     try a.set(0, 0, F.from(2, 1));
-//     try a.set(0, 2, F.from(3, 1));
-//     try a.set(1, 1, F.zero);
-//     try a.set(1, 2, F.from(5, 1));
-//     try a.set(1, 0, F.from(6, 1));
-//     try a.set(2, 2, F.from(7, 1));
-//     try a.set(2, 0, F.from(8, 1));
-//     try a.set(2, 1, F.from(9, 1));
-
-//     var b = try a.like(ally);
-//     defer b.deinit();
-//     try b.diag(F.eye);
-
-//     try b.set(0, 2, F.from(1, 1));
-//     try b.set(1, 2, F.from(1, 1));
-
-//     var c = try M.init(n, n, ally);
-//     defer c.deinit();
-//     try a.mul(b, c);
-
-//     try testing.expect(c.at(0, 0).cmp(.eq, F.from(2, 1)));
-//     try testing.expect(c.at(0, 1).cmp(.eq, F.from(1, 1)));
-//     try testing.expect(c.at(0, 2).cmp(.eq, F.from(6, 1)));
-//     try testing.expect(c.at(1, 0).cmp(.eq, F.from(6, 1)));
-//     try testing.expect(c.at(1, 1).cmp(.eq, F.from(0, 1)));
-//     try testing.expect(c.at(1, 2).cmp(.eq, F.from(11, 1)));
-//     try testing.expect(c.at(2, 0).cmp(.eq, F.from(8, 1)));
-//     try testing.expect(c.at(2, 1).cmp(.eq, F.from(9, 1)));
-//     try testing.expect(c.at(2, 2).cmp(.eq, F.from(24, 1)));
-// }
-
-// test "matrix addition and subtraction" {
-//     const ally = std.testing.allocator;
-//     const F = @import("field.zig").Float(f32);
-//     const M = MatrixType(F, usize);
-
-//     // 2 0 1   1 0 1   3 0 2
-//     // 0 0 5 + 0 1 1 = 0 1 6
-//     // 8 9-1   0 0 1   8 9 0
-
-//     var a = try M.init(3, 3, ally);
-//     defer a.deinit();
-
-//     try a.set(0, 0, F.from(2, 1));
-//     try a.set(0, 1, F.zero);
-//     try a.set(0, 2, F.from(1, 1));
-//     try a.set(1, 0, F.zero);
-//     try a.set(1, 1, F.zero);
-//     try a.set(1, 2, F.from(5, 1));
-//     try a.set(2, 0, F.from(8, 1));
-//     try a.set(2, 1, F.from(9, 1));
-//     try a.set(2, 2, F.from(-1, 1));
-
-//     var b = try M.like(a, ally);
-//     defer b.deinit();
-//     try b.diag(F.eye);
-
-//     try b.set(0, 2, F.from(1, 1));
-//     try b.set(1, 2, F.from(1, 1));
-
-//     var c = try M.init(3, 3, ally);
-//     defer c.deinit();
-//     try a.add(b, c);
-
-//     try testing.expect(c.at(0, 0).cmp(.eq, F.from(3, 1)));
-//     try testing.expect(c.at(0, 1).cmp(.eq, F.zero));
-//     try testing.expect(c.at(0, 2).cmp(.eq, F.from(2, 1)));
-//     try testing.expect(c.at(1, 0).cmp(.eq, F.zero));
-//     try testing.expect(c.at(1, 1).cmp(.eq, F.from(1, 1)));
-//     try testing.expect(c.at(1, 2).cmp(.eq, F.from(6, 1)));
-//     try testing.expect(c.at(2, 0).cmp(.eq, F.from(8, 1)));
-//     try testing.expect(c.at(2, 1).cmp(.eq, F.from(9, 1)));
-//     try testing.expect(c.at(2, 2).cmp(.eq, F.zero));
-
-//     // 2 0 1   1 0 1   1 0 0
-//     // 0 0 5 - 0 1 1 = 0-1 4
-//     // 8 9-1   0 0 1   8 9-2
-
-//     var d = try M.init(3, 3, ally);
-//     defer d.deinit();
-//     try a.sub(b, d);
-
-//     try testing.expect(d.at(0, 0).cmp(.eq, F.from(1, 1)));
-//     try testing.expect(d.at(0, 1).cmp(.eq, F.zero));
-//     try testing.expect(d.at(0, 2).cmp(.eq, F.zero));
-//     try testing.expect(d.at(1, 0).cmp(.eq, F.zero));
-//     try testing.expect(d.at(1, 1).cmp(.eq, F.from(-1, 1)));
-//     try testing.expect(d.at(1, 2).cmp(.eq, F.from(4, 1)));
-//     try testing.expect(d.at(2, 0).cmp(.eq, F.from(8, 1)));
-//     try testing.expect(d.at(2, 1).cmp(.eq, F.from(9, 1)));
-//     try testing.expect(d.at(2, 2).cmp(.eq, F.from(-2, 1)));
-// }
+    try testing.expect(c.at(0).cmp(.eq, F.from(-1, 1)));
+    try testing.expect(c.at(1).cmp(.eq, F.from(1, 1)));
+    try testing.expect(c.at(2).cmp(.eq, F.from(6, 1)));
+}
 
 // test "matrix LU solve" {
 //     const ally = std.testing.allocator;
