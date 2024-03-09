@@ -5,44 +5,51 @@ const Allocator = std.mem.Allocator;
 const PermutationType = @import("../permutation.zig").PermutationType;
 
 /// priorityqueue for given number of elements where the order of the elements popped can be retrieved as a permutation
-pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a: Priority, b: Priority) bool, comptime Index: type) type {
+pub fn PermutationQueueType(comptime Priority: type, comptime before: fn (a: Priority, b: Priority) bool, comptime Index: type) type {
     return struct {
-        const Self = @This();
+        const PermutaionQueue = @This();
         const Permutation = PermutationType(Index);
 
         items: Permutation,
         priorities: [*]Priority,
-        len: Index, //current queue length
+        len: *Index, //current queue length
 
         ///Initialize and return priority queue
-        pub fn init(n: Index, allocator: Allocator) !Self {
-            return Self{
-                .items = try Permutation.eye(n, allocator),
-                .priorities = (try allocator.alloc(Priority, n)).ptr,
-                .len = 0,
-            };
+        pub fn init(n: Index, allocator: Allocator) !PermutaionQueue {
+            var res: PermutaionQueue = undefined;
+
+            res.items = try Permutation.eye(n, allocator);
+            errdefer allocator.free(res.priorities[0..res.items.len]);
+            res.priorities = (try allocator.alloc(Priority, n)).ptr;
+            errdefer res.items.deinit(allocator);
+            res.len = try allocator.create(Index);
+            errdefer allocator.destroy(res.len);
+            res.len.* = 0;
+            return res;
         }
 
-        pub fn deinit(self: Self, allocator: Allocator) void {
+        pub fn deinit(self: PermutaionQueue, allocator: Allocator) void {
             allocator.free(self.priorities[0..self.items.len]);
             self.items.deinit(allocator);
+            allocator.destroy(self.len);
         }
 
-        pub fn deinitToPermutation(self: Self, allocator: Allocator) Permutation {
+        pub fn deinitToPermutation(self: PermutaionQueue, allocator: Allocator) Permutation {
             allocator.free(self.priorities[0..self.items.len]);
+            allocator.destroy(self.len);
             return self.items;
         }
 
-        pub fn capacity(self: Self) Index {
+        pub fn capacity(self: PermutaionQueue) Index {
             return self.items.len;
         }
 
         //returns true if the the element is currently in the queue
-        pub fn isQueued(self: Self, elem: Index) bool {
-            return self.items.atInv(elem) >= self.capacity() - self.len;
+        pub fn isQueued(self: PermutaionQueue, elem: Index) bool {
+            return self.items.atInv(elem) >= self.capacity() - self.len.*;
         }
 
-        pub fn set(self: *Self, elem: Index, priority: Priority) void {
+        pub fn set(self: PermutaionQueue, elem: Index, priority: Priority) void {
             if (self.isQueued(elem)) { //update item
                 const old_priority = self.priorities[elem];
                 const current_index = self.items.atInv(elem);
@@ -55,14 +62,14 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             } else { //add item
                 self.priorities[elem] = priority;
                 const current_index = self.items.atInv(elem);
-                const insert_index = self.capacity() - 1 - self.len;
+                const insert_index = self.capacity() - 1 - self.len.*;
                 self.items.swap(current_index, insert_index);
-                self.len += 1;
+                self.len.* += 1;
                 self.siftUp(insert_index);
             }
         }
 
-        fn siftUp(self: *Self, start_index: Index) void {
+        fn siftUp(self: PermutaionQueue, start_index: Index) void {
             var child_index = start_index;
             const child = self.items.at(child_index);
             const child_priority = self.priorities[child];
@@ -76,14 +83,14 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             }
         }
 
-        fn siftDown(self: *Self, start_index: Index) void {
+        fn siftDown(self: PermutaionQueue, start_index: Index) void {
             var index = start_index;
             while (true) {
                 var first_index = index;
                 var first_priority = self.priorities[self.items.at(first_index)];
                 //right
                 const right_pos = (self.capacity() - index) << 1;
-                if (right_pos <= self.len) {
+                if (right_pos <= self.len.*) {
                     const right_index = self.capacity() - right_pos;
                     const right_priority = self.priorities[self.items.at(right_index)];
                     if (before(right_priority, first_priority)) {
@@ -93,7 +100,7 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
                 } else return;
                 //left
                 const left_pos = right_pos + 1;
-                if (left_pos <= self.len) {
+                if (left_pos <= self.len.*) {
                     const left_index = self.capacity() - left_pos;
                     const left_priority = self.priorities[self.items.at(left_index)];
                     if (before(left_priority, first_priority)) {
@@ -109,17 +116,17 @@ pub fn PermutationPriorityQueue(comptime Priority: type, comptime before: fn (a:
             }
         }
 
-        pub fn peek(self: *Self) Index {
-            assert(self.len > 0);
+        pub fn peek(self: PermutaionQueue) Index {
+            assert(self.len.* > 0);
             return self.items.at(self.capacity() - 1);
         }
 
-        pub fn remove(self: *Self) Index {
-            assert(self.len > 0);
+        pub fn remove(self: PermutaionQueue) Index {
+            assert(self.len.* > 0);
             const first_index = self.capacity() - 1;
             const first = self.items.at(first_index);
-            self.items.swap(first_index, self.capacity() - self.len);
-            self.len -= 1;
+            self.items.swap(first_index, self.capacity() - self.len.*);
+            self.len.* -= 1;
             self.siftDown(first_index);
             return first;
         }
@@ -133,7 +140,7 @@ test "permutation queue" {
             return a < b;
         }
     };
-    const PPQ = PermutationPriorityQueue(f32, P.lt, usize);
+    const PPQ = PermutationQueueType(f32, P.lt, usize);
     var queue = try PPQ.init(6, ally);
     //defer queue.deinit(ally);
 
