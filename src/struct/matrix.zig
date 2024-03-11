@@ -485,13 +485,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 try s.run(a);
             }
 
-            // pub fn fromT(a: LU, b: Matrix) !void {
-            //     const s = try Solver.init(b.rows, a.u.allocator);
-            //     defer s.deinit();
-            //     try s.setT(b);
-            //     try s.run(a);
-            // }
-
             pub fn solve(a: LU, b: Vector, res: Vector) void {
                 const n = a.buf.len;
                 assert(n == b.len and n == res.len);
@@ -521,19 +514,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     res.set(col_diag, sum.div(elem_diag));
                 }
             }
-
-            // pub fn solveT(a: LU, b: Vector, res: Vector) void {
-            //     const n = a.u.cols;
-            //     assert(n == res.len);
-            //     assert(n == b.len);
-            //     res.fill(Element.zero);
-
-            //     //apply u-T
-            //     for (0..n) |i| {
-            //         const row = a.p[i];
-            //         const col = a.q[i];
-            //     }
-            // }
 
             pub fn det(a: LU) Element {
                 var res = Element.eye;
@@ -639,41 +619,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         a.updateQueue(i);
                     }
                 }
-
-                // fn setT(a: Solver, b: Matrix) !void {
-                //     assert(a.u.len == b.cols);
-                //     assert(a.queue.items.len == b.rows);
-                //     for (0..b.cols) |i| {
-                //         a.u[i].len = 0;
-                //         a.lT[i].len = 0;
-                //     }
-                //     for (0..b.rows) |i| {
-                //         const n = b.rptr[i + 1] - b.rptr[i];
-                //         const nzrows = &a.queue.priorities[i].nzrows;
-                //         try nzrows.ensureTotalCapacity(a.allocator, n);
-                //         nzrows.items.len = n;
-                //         @memcpy(nzrows.items, b.val.items(.col)[b.rptr[i]..b.rptr[i + 1]]);
-                //         for (b.val.items(.col)[b.rptr[i]..b.rptr[i + 1]]) |col| {
-                //             a.u[col].len += 1;
-                //         }
-                //     }
-                //     for (0..b.cols) |i| {
-                //         const n = a.u[i].len;
-                //         a.u[i].len = 0;
-                //         try Solver.ensureEntrySliceCapacity(&a.u[i], n, a.allocator);
-                //     }
-                //     for (0..b.rows) |i| {
-                //         for (b.rptr[i]..b.rptr[i + 1]) |j| {
-                //             const col = b.val.items(.col)[j];
-                //             const val = b.val.items(.val)[j];
-                //             a.u[col].len += 1;
-                //             a.u[col].set(a.u[col].len - 1, .{ .val = val, .col = i });
-                //         }
-                //     }
-                //     for (0..b.rows) |i| {
-                //         a.updateQueue(i);
-                //     }
-                // }
 
                 /// return index of row, col in matrix
                 /// performs binary search
