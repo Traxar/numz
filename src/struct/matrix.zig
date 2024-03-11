@@ -1091,6 +1091,8 @@ test "matrix solve" {
     try testing.expectEqual(F.from(-1, 2), x.at(0));
     try testing.expectEqual(F.from(3, 2), x.at(1));
     try testing.expectEqual(F.from(-1, 2), x.at(2));
+
+    try testing.expectEqual(F.from(2, 1), lu.det());
 }
 
 test "matrix multiplication with element" {
