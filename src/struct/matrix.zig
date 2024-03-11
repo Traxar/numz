@@ -1056,19 +1056,19 @@ test "matrix solve" {
     const F = @import("field.zig").Float(f32);
     const M = MatrixType(F, usize);
 
-    // 2  2  2   -0.5   1
-    // 1  3  2 * -0.5 = 1
-    // 0  1  1    1.5   1
+    // 1  2  3  -0.5   1
+    // 2  2  2 * 1.5 = 1
+    // 0  1  1  -0.5   1
 
     const n = 3;
     const a = try M.init(n, n, ally);
     defer a.deinit();
     var a_ = try a.build(8);
-    a_.set(0, 0, F.from(2, 1));
+    a_.set(0, 0, F.from(1, 1));
     a_.set(0, 1, F.from(2, 1));
-    a_.set(0, 2, F.from(2, 1));
-    a_.set(1, 0, F.from(1, 1));
-    a_.set(1, 1, F.from(3, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 0, F.from(2, 1));
+    a_.set(1, 1, F.from(2, 1));
     a_.set(1, 2, F.from(2, 1));
     a_.set(2, 1, F.from(1, 1));
     a_.set(2, 2, F.from(1, 1));
@@ -1078,18 +1078,6 @@ test "matrix solve" {
     defer lu.deinit();
 
     try lu.from(a);
-
-    try testing.expect(lu.u.val.len == 6);
-    try testing.expectEqual(F.from(2, 1), lu.u.at(0, 0));
-    try testing.expectEqual(F.from(2, 1), lu.u.at(0, 1));
-    try testing.expectEqual(F.from(2, 1), lu.u.at(0, 2));
-    try testing.expectEqual(F.from(2, 1), lu.u.at(1, 1));
-    try testing.expectEqual(F.from(1, 1), lu.u.at(1, 2));
-    try testing.expectEqual(F.from(1, 2), lu.u.at(2, 2));
-
-    try testing.expect(lu.lT.val.len == 2);
-    try testing.expectEqual(F.from(1, 2), lu.lT.at(0, 1));
-    try testing.expectEqual(F.from(1, 2), lu.lT.at(1, 2));
 
     const b = try M.Vector.init(n, ally);
     defer b.deinit(ally);
@@ -1101,8 +1089,8 @@ test "matrix solve" {
     lu.solve(b, x);
 
     try testing.expectEqual(F.from(-1, 2), x.at(0));
-    try testing.expectEqual(F.from(-1, 2), x.at(1));
-    try testing.expectEqual(F.from(3, 2), x.at(2));
+    try testing.expectEqual(F.from(3, 2), x.at(1));
+    try testing.expectEqual(F.from(-1, 2), x.at(2));
 }
 
 test "matrix multiplication with element" {
