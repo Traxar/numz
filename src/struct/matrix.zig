@@ -906,6 +906,47 @@ test "matrix transpose" {
     }
 }
 
+test "matrix addition" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, usize);
+
+    // 1 2 3   1 0 0   0 2 3
+    // 0 0 4 - 2 0 0 =-2 0 4
+    // 0 0 0   3 4 0  -3-4 0
+
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(4);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 2, F.from(4, 1));
+    a_.fin();
+
+    const b = try M.init(n, n, ally);
+    defer b.deinit();
+    try a.transpose(b);
+    try b.mulE(F.from(-1, 1), b);
+
+    var c = try M.init(n, n, ally);
+    defer c.deinit();
+    try a.add(b, c);
+
+    try testing.expect(c.val.capacity == 7);
+    try testing.expect(c.val.len == 6);
+    try testing.expectEqual(F.from(0, 1), c.at(0, 0));
+    try testing.expectEqual(F.from(2, 1), c.at(0, 1));
+    try testing.expectEqual(F.from(3, 1), c.at(0, 2));
+    try testing.expectEqual(F.from(-2, 1), c.at(1, 0));
+    try testing.expectEqual(F.from(0, 1), c.at(1, 1));
+    try testing.expectEqual(F.from(4, 1), c.at(1, 2));
+    try testing.expectEqual(F.from(-3, 1), c.at(2, 0));
+    try testing.expectEqual(F.from(-4, 1), c.at(2, 1));
+    try testing.expectEqual(F.from(0, 1), c.at(2, 2));
+}
+
 test "matrix multiplication" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
@@ -953,91 +994,6 @@ test "matrix multiplication" {
     try testing.expectEqual(F.from(0, 1), c.at(2, 0));
     try testing.expectEqual(F.from(6, 1), c.at(2, 1));
     try testing.expectEqual(F.from(6, 1), c.at(2, 2));
-}
-
-test "matrix addition" {
-    const ally = std.testing.allocator;
-    const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
-
-    // 1 2 3   1 0 0   0 2 3
-    // 0 0 4 - 2 0 0 =-2 0 4
-    // 0 0 0   3 4 0  -3-4 0
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit();
-    var a_ = try a.build(4);
-    a_.set(0, 0, F.from(1, 1));
-    a_.set(0, 1, F.from(2, 1));
-    a_.set(0, 2, F.from(3, 1));
-    a_.set(1, 2, F.from(4, 1));
-    a_.fin();
-
-    const b = try M.init(n, n, ally);
-    defer b.deinit();
-    try a.transpose(b);
-    try b.mulE(F.from(-1, 1), b);
-
-    var c = try M.init(n, n, ally);
-    defer c.deinit();
-    try a.add(b, c);
-
-    try testing.expect(c.val.capacity == 7);
-    try testing.expect(c.val.len == 6);
-    try testing.expectEqual(F.from(0, 1), c.at(0, 0));
-    try testing.expectEqual(F.from(2, 1), c.at(0, 1));
-    try testing.expectEqual(F.from(3, 1), c.at(0, 2));
-    try testing.expectEqual(F.from(-2, 1), c.at(1, 0));
-    try testing.expectEqual(F.from(0, 1), c.at(1, 1));
-    try testing.expectEqual(F.from(4, 1), c.at(1, 2));
-    try testing.expectEqual(F.from(-3, 1), c.at(2, 0));
-    try testing.expectEqual(F.from(-4, 1), c.at(2, 1));
-    try testing.expectEqual(F.from(0, 1), c.at(2, 2));
-}
-
-test "matrix solve" {
-    const ally = std.testing.allocator;
-    const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
-
-    // 1  2  3  -0.5   1
-    // 2  2  2 * 1.5 = 1
-    // 0  1  1  -0.5   1
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit();
-    var a_ = try a.build(8);
-    a_.set(0, 0, F.from(1, 1));
-    a_.set(0, 1, F.from(2, 1));
-    a_.set(0, 2, F.from(3, 1));
-    a_.set(1, 0, F.from(2, 1));
-    a_.set(1, 1, F.from(2, 1));
-    a_.set(1, 2, F.from(2, 1));
-    a_.set(2, 1, F.from(1, 1));
-    a_.set(2, 2, F.from(1, 1));
-    a_.fin();
-
-    const lu = try a.initLU(ally);
-    defer lu.deinit();
-
-    try lu.from(a);
-
-    const b = try M.Vector.init(n, ally);
-    defer b.deinit(ally);
-    b.fill(F.eye);
-
-    const x = try b.like(ally);
-    defer x.deinit(ally);
-
-    lu.solve(b, x);
-
-    try testing.expectEqual(F.from(-1, 2), x.at(0));
-    try testing.expectEqual(F.from(3, 2), x.at(1));
-    try testing.expectEqual(F.from(-1, 2), x.at(2));
-
-    try testing.expectEqual(F.from(2, 1), lu.det());
 }
 
 test "matrix multiplication with element" {
@@ -1105,4 +1061,48 @@ test "matrix mulpiplication with vector" {
     try testing.expect(c.at(0).cmp(.eq, F.from(-1, 1)));
     try testing.expect(c.at(1).cmp(.eq, F.from(1, 1)));
     try testing.expect(c.at(2).cmp(.eq, F.from(6, 1)));
+}
+
+test "matrix solve" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, usize);
+
+    // 1  2  3  -0.5   1
+    // 2  2  2 * 1.5 = 1
+    // 0  1  1  -0.5   1
+
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(8);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 0, F.from(2, 1));
+    a_.set(1, 1, F.from(2, 1));
+    a_.set(1, 2, F.from(2, 1));
+    a_.set(2, 1, F.from(1, 1));
+    a_.set(2, 2, F.from(1, 1));
+    a_.fin();
+
+    const lu = try a.initLU(ally);
+    defer lu.deinit();
+
+    try lu.from(a);
+
+    const b = try M.Vector.init(n, ally);
+    defer b.deinit(ally);
+    b.fill(F.eye);
+
+    const x = try b.like(ally);
+    defer x.deinit(ally);
+
+    lu.solve(b, x);
+
+    try testing.expectEqual(F.from(-1, 2), x.at(0));
+    try testing.expectEqual(F.from(3, 2), x.at(1));
+    try testing.expectEqual(F.from(-1, 2), x.at(2));
+
+    try testing.expectEqual(F.from(2, 1), lu.det());
 }
