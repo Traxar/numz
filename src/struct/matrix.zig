@@ -444,6 +444,15 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             }
         }
 
+        /// frobenius norm = sqrt of sum of all squared entries
+        pub fn frobenius(a: Matrix) Element {
+            var sum = Element.zero;
+            for (a.val.items(.val)) |a_| {
+                sum = sum.add(a_.mul(a_));
+            }
+            return sum.sqrt();
+        }
+
         pub const LU = struct {
             p: [*]Index,
             q: [*]Index,
@@ -1061,6 +1070,32 @@ test "matrix mulpiplication with vector" {
     try testing.expect(c.at(0).cmp(.eq, F.from(-1, 1)));
     try testing.expect(c.at(1).cmp(.eq, F.from(1, 1)));
     try testing.expect(c.at(2).cmp(.eq, F.from(6, 1)));
+}
+
+test "matrix norm" {
+    const ally = std.testing.allocator;
+    const F = @import("field.zig").Float(f32);
+    const M = MatrixType(F, u8);
+
+    // 1  2  3
+    // 2  1  2
+    // 0  1  1
+
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit();
+    var a_ = try a.build(8);
+    a_.set(0, 0, F.from(1, 1));
+    a_.set(0, 1, F.from(2, 1));
+    a_.set(0, 2, F.from(3, 1));
+    a_.set(1, 0, F.from(2, 1));
+    a_.set(1, 1, F.from(1, 1));
+    a_.set(1, 2, F.from(2, 1));
+    a_.set(2, 1, F.from(1, 1));
+    a_.set(2, 2, F.from(1, 1));
+    a_.fin();
+
+    try testing.expectEqual(F.from(5, 1), a.frobenius());
 }
 
 test "matrix solve" {
