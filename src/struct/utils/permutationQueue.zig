@@ -18,10 +18,11 @@ pub fn PermutationQueueType(comptime Priority: type, comptime before: fn (a: Pri
         pub fn init(n: Index, allocator: Allocator) !PermutaionQueue {
             var res: PermutaionQueue = undefined;
 
-            res.items = try Permutation.eye(n, allocator);
-            errdefer allocator.free(res.priorities[0..res.items.len]);
-            res.priorities = (try allocator.alloc(Priority, n)).ptr;
+            res.items = try Permutation.init(n, allocator);
             errdefer res.items.deinit(allocator);
+            res.items.eye();
+            res.priorities = (try allocator.alloc(Priority, n)).ptr;
+            errdefer allocator.free(res.priorities[0..res.items.len]);
             res.len = try allocator.create(Index);
             errdefer allocator.destroy(res.len);
             res.len.* = 0;
