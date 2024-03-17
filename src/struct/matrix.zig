@@ -2,13 +2,15 @@ const std = @import("std");
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const PermutationQueue = @import("utils/permutationPriorityQueue.zig").PermutationQueueType;
+const PermutationQueue = @import("utils/permutationQueue.zig").PermutationQueueType;
 
 /// struct for matrix operations
 /// Element must be a field
 /// Index must be an unsigned integer <= usize
 pub fn MatrixType(comptime Element: type, comptime Index: type) type {
-    //TODO: assertions for Index type
+    assert(@typeInfo(Index) == .Int);
+    assert(@typeInfo(Index).Int.signedness == .unsigned);
+    assert(@typeInfo(Index).Int.bits <= 64);
     return struct {
         const Matrix = @This();
         const Vector = @import("vector.zig").VectorType(Element);
@@ -21,7 +23,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         cols: Index,
         rptr: [*]usize,
         val: *EntrySlice,
-        //TODO: check usize/Index
         allocator: Allocator,
 
         /// deinitialize matrix
@@ -259,7 +260,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         }
 
         /// count nonzeros of a * b
-        fn count_mul(a: Matrix, b: Matrix, buf: []Index) !usize {
+        fn count_mul(a: Matrix, b: Matrix, buf: []usize) !usize {
             var n: usize = 0;
             for (0..a.rows) |i| {
                 for (a.rptr[i]..a.rptr[i + 1]) |j| {
@@ -302,7 +303,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             assert(res.cols == b.cols);
             assert(a.val != res.val);
             assert(b.val != res.val);
-            const buf = try res.allocator.alloc(Index, b.rows);
+            const buf = try res.allocator.alloc(usize, b.rows);
             defer res.allocator.free(buf);
             try res.ensureTotalCapacity(try a.count_mul(b, buf));
             res.val.len = 0;
@@ -443,11 +444,6 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             }
         }
 
-        pub fn initLU(a: Matrix, allocator: Allocator) !LU {
-            assert(a.rows == a.cols);
-            return try LU.init(a.rows, allocator);
-        }
-
         pub const LU = struct {
             p: [*]Index,
             q: [*]Index,
@@ -481,8 +477,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             pub fn from(a: LU, b: Matrix) !void {
                 const s = try Solver.init(b.rows, a.u.allocator);
                 defer s.deinit();
-                try s.set(b);
-                try s.run(a);
+                try s.run(b, a);
             }
 
             pub fn solve(a: LU, b: Vector, res: Vector) void {
@@ -609,13 +604,16 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         a.queue.priorities[i].nzrows.items.len = 0;
                         try a.queue.priorities[i].nzrows.ensureTotalCapacity(a.allocator, n);
                     }
-                    for (0..b.rows) |i| {
+                    var i: Index = 0;
+                    while (i < b.rows) : (i += 1) {
                         const cols = b.val.items(.col);
                         for (b.rptr[i]..b.rptr[i + 1]) |j| {
                             a.queue.priorities[cols[j]].nzrows.appendAssumeCapacity(i);
                         }
                     }
-                    for (0..b.cols) |i| {
+                    i = 0;
+
+                    while (i < b.cols) : (i += 1) {
                         a.updateQueue(i);
                     }
                 }
@@ -657,7 +655,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                             _ = prio.nzrows.swapRemove(i);
                         }
                     }
-                    prio.n = prio.nzrows.items.len;
+                    prio.n = @intCast(prio.nzrows.items.len);
                     prio.norm1 = norm1;
                     a.queue.set(col, prio.*);
                 }
@@ -777,7 +775,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     for (0..n) |_| {
                         var r: Index = 0;
                         const nz = a.queue.priorities[col].nzrows.items;
-                        for (1..nz.len) |i| {
+                        var i: Index = 1;
+                        while (i < nz.len) : (i += 1) {
                             if (nz[i] < nz[r]) {
                                 r = i;
                             }
@@ -812,7 +811,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     }
                 }
 
-                pub fn run(a: Solver, lu: LU) !void {
+                pub fn run(a: Solver, b: Matrix, lu: LU) !void {
+                    try a.set(b);
                     assert(lu.u.rows == a.u.len);
                     for (0..a.queue.items.len) |i| {
                         const col = a.queue.remove();
@@ -835,7 +835,7 @@ test "matrix builder" {
 
     const ally = testing.allocator;
     const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
 
     const a = try M.init(n, m, ally); //const only refers to the dimensions
     defer a.deinit();
@@ -844,30 +844,30 @@ test "matrix builder" {
     try testing.expect(a.val.capacity == n * m);
     for (0..n) |i| {
         for (0..m) |j| {
-            b.set(i, j, F.from(@intCast(i * m + j), 1));
+            b.set(@intCast(i), @intCast(j), F.from(@intCast(i * m + j), 1));
         }
     }
     b.fin();
     try testing.expect(a.val.len == n * m - 1);
     for (0..n) |i| {
         for (0..m) |j| {
-            try testing.expectEqual(F.from(@intCast(i * m + j), 1), a.at(i, j));
+            try testing.expectEqual(F.from(@intCast(i * m + j), 1), a.at(@intCast(i), @intCast(j)));
         }
     }
 
     b = try a.build(n);
     try testing.expect(a.val.capacity == n * m);
     for (0..@min(n, m)) |i| {
-        b.set(i, i, F.from(@intCast(i), 1));
+        b.set(@intCast(i), @intCast(i), F.from(@intCast(i), 1));
     }
     b.fin();
     try testing.expect(a.val.len == n - 1);
     for (0..n) |i| {
         for (0..m) |j| {
             if (i == j) {
-                try testing.expectEqual(F.from(@intCast(i), 1), a.at(i, j));
+                try testing.expectEqual(F.from(@intCast(i), 1), a.at(@intCast(i), @intCast(j)));
             } else {
-                try testing.expectEqual(F.zero, a.at(i, j));
+                try testing.expectEqual(F.zero, a.at(@intCast(i), @intCast(j)));
             }
         }
     }
@@ -909,7 +909,7 @@ test "matrix transpose" {
 test "matrix addition" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
 
     // 1 2 3   1 0 0   0 2 3
     // 0 0 4 - 2 0 0 =-2 0 4
@@ -950,7 +950,7 @@ test "matrix addition" {
 test "matrix multiplication" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
 
     // 1 2 3   1 0-1   1 5 0
     // 0 4 5 * 0 1-1 = 0 9 1
@@ -999,14 +999,14 @@ test "matrix multiplication" {
 test "matrix multiplication with element" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
 
     const n = 3;
     const a = try M.init(n, n, ally);
     defer a.deinit();
     var a_ = try a.build(n);
     for (0..n) |i| {
-        a_.set(i, i, F.eye);
+        a_.set(@intCast(i), @intCast(i), F.eye);
     }
     a_.fin();
     const b = F.from(-314, 100);
@@ -1014,14 +1014,14 @@ test "matrix multiplication with element" {
     a.mulE(b, a) catch unreachable; //since inplace
     for (0..n) |i| {
         for (0..n) |j| {
-            try testing.expect(a.at(i, j).cmp(.eq, if (i == j) b else F.zero));
+            try testing.expect(a.at(@intCast(i), @intCast(j)).cmp(.eq, if (i == j) b else F.zero));
         }
     }
 
     a.divE(b, a) catch unreachable; //since inplace
     for (0..n) |i| {
         for (0..n) |j| {
-            try testing.expect(a.at(i, j).cmp(.eq, if (i == j) F.eye else F.zero));
+            try testing.expect(a.at(@intCast(i), @intCast(j)).cmp(.eq, if (i == j) F.eye else F.zero));
         }
     }
 }
@@ -1030,7 +1030,7 @@ test "matrix mulpiplication with vector" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
     const V = @import("vector.zig").VectorType(F);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
 
     // 1 2 3   -2   -1
     // 0 4 5 * -1 =  1
@@ -1066,7 +1066,8 @@ test "matrix mulpiplication with vector" {
 test "matrix solve" {
     const ally = std.testing.allocator;
     const F = @import("field.zig").Float(f32);
-    const M = MatrixType(F, usize);
+    const M = MatrixType(F, u8);
+    const V = @import("vector.zig").VectorType(F);
 
     // 1  2  3  -0.5   1
     // 2  2  2 * 1.5 = 1
@@ -1086,18 +1087,16 @@ test "matrix solve" {
     a_.set(2, 2, F.from(1, 1));
     a_.fin();
 
-    const lu = try a.initLU(ally);
-    defer lu.deinit();
-
-    try lu.from(a);
-
-    const b = try M.Vector.init(n, ally);
+    const b = try V.init(n, ally);
     defer b.deinit(ally);
     b.fill(F.eye);
 
+    const lu = try M.LU.init(n, ally);
+    defer lu.deinit();
+    try lu.from(a);
+
     const x = try b.like(ally);
     defer x.deinit(ally);
-
     lu.solve(b, x);
 
     try testing.expectEqual(F.from(-1, 2), x.at(0));

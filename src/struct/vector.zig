@@ -150,7 +150,7 @@ pub fn VectorType(comptime Element: type) type {
             return res.SIMDreduce(.Add);
         }
 
-        ///return the euklidean norm
+        ///return the euclidean norm
         pub fn norm(a: Vector) Element {
             return a.dot(a).sqrt();
         }

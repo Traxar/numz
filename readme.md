@@ -1,11 +1,11 @@
 # numz
 
-This is a numerics library written in `zig 0.12.0-dev.2540+776cd673f`
+This is a numerics library written in `zig 0.12.0-dev.3336+dbb11915b`
 
 ToDo:
 
-    * restore LU Solver
-    * unify init bahaviour of all structs
+    * inplace sparse matrix addition and elimination (internal optimization, hint: backwards)
+    * QR, SVD
     * improve comments and doc comments
     * better test checks for vectors and matrices
     * benchmarks 
@@ -19,7 +19,7 @@ Planned Features:
         [x] SIMD support
     [x] Permutations
     [x] Sparse matrices (no SIMD support)
-        [-] LU solver (temporarily regressed)
+        [x] LU solver
     [ ] dense matrices (SIMD support)
         [ ] solver
     [ ] Meshes
