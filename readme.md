@@ -5,8 +5,9 @@ This is a numerics library written in `zig 0.12.0-dev.3336+dbb11915b`
 ToDo:
 
     * inplace sparse matrix addition and elimination (internal optimization, hint: backwards)
+    * optimize `rowCast` of dense matrix
     * QR, SVD
-    * improve comments and doc comments
+    * improve doc comments
     * better test checks for vectors and matrices
     * benchmarks 
 
@@ -20,7 +21,7 @@ Planned Features:
     [x] Permutations
     [x] Sparse matrices (no SIMD support)
         [x] LU solver
-    [ ] dense matrices (SIMD support)
+    [x] dense matrices (SIMD support)
         [ ] solver
     [ ] Meshes
     [ ] PDE toolbox
