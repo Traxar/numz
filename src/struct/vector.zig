@@ -21,10 +21,12 @@ pub fn VectorType(comptime Element: type) type {
         ///allocate vector with undefined values
         pub fn init(n: usize, allocator: Allocator) !Vector {
             const n_SIMD = 1 + @divFloor(n - 1, SIMDsize); //divCeil
-            return Vector{
+            const res = Vector{
                 .val = try allocator.alloc(SIMDElement, n_SIMD),
                 .len = n,
             };
+            res.SIMDsetTail(SIMDElement.zero);
+            return res;
         }
 
         ///allocate vector with undefined values and same dimensions as a
@@ -50,13 +52,13 @@ pub fn VectorType(comptime Element: type) type {
         }
 
         /// set tail elements of a to b
-        fn SIMDsetTail(a: Vector, b: SIMDElement) void {
+        pub fn SIMDsetTail(a: Vector, b: SIMDElement) void {
             const i = a.val.len - 1;
             const tail_size = a.len - i * SIMDsize;
             if (tail_size == 0) return;
             const uSIMDsize = std.meta.Int(.unsigned, SIMDsize);
             //bitcast from int to @vector(bool) reverses the order
-            const pred: @Vector(SIMDsize, bool) = @bitCast((@as(uSIMDsize, 1) << @intCast(tail_size)) - 1);
+            const pred: @Vector(SIMDsize, bool) = @bitCast((@as(uSIMDsize, 1) << @truncate(tail_size)) - 1);
 
             a.val[i] = a.val[i].SIMDselect(b, pred);
         }
@@ -99,9 +101,18 @@ pub fn VectorType(comptime Element: type) type {
         /// res <- a * b
         pub fn mulE(a: Vector, b: Element, res: Vector) void {
             assert(res.len == a.len);
-            const c = Vector.SIMDsplat(b);
+            const c = SIMDElement.SIMDsplat(b);
             for (0..res.val.len) |i_SIMD| {
                 res.val[i_SIMD] = a.val[i_SIMD].mul(c);
+            }
+        }
+
+        /// res <- a + b * c
+        pub fn mulEAdd(a: Vector, b: Element, c: Vector, res: Vector) void {
+            assert(res.len == a.len);
+            const b_ = SIMDElement.SIMDsplat(b);
+            for (0..res.val.len) |i_SIMD| {
+                res.val[i_SIMD] = a.val[i_SIMD].add(b_.mul(c.val[i_SIMD]));
             }
         }
 
@@ -114,10 +125,20 @@ pub fn VectorType(comptime Element: type) type {
             }
         }
 
+        /// res <- a + b * c
+        pub fn mulAdd(a: Vector, b: Vector, c: Vector, res: Vector) void {
+            assert(res.len == a.len);
+            assert(res.len == b.len);
+            assert(res.len == c.len);
+            for (0..res.val.len) |i_SIMD| {
+                res.val[i_SIMD] = a.val[i_SIMD].add(b.val[i_SIMD].mul(c.val[i_SIMD]));
+            }
+        }
+
         /// res <- a / b
         pub fn divE(a: Vector, b: Element, res: Vector) void {
             assert(res.len == a.len);
-            const c = Vector.SIMDsplat(b);
+            const c = SIMDElement.SIMDsplat(b);
             for (0..res.val.len) |i_SIMD| {
                 res.val[i_SIMD] = a.val[i_SIMD].div(c);
             }
