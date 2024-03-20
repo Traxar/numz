@@ -50,7 +50,7 @@ pub fn MatrixType(comptime Element: type) type {
         pub fn copy(a: Matrix, res: Matrix) void {
             assert(a.rows == res.rows);
             assert(a.cols == res.cols);
-            if (a.val != res.val) {
+            if (a.val.ptr != res.val.ptr) {
                 @memcpy(res.val, a.val);
             }
         }
@@ -175,6 +175,52 @@ pub fn MatrixType(comptime Element: type) type {
             }
             return sum.sqrt();
         }
+
+        pub const LQ = struct {
+            l: Matrix,
+            q: Matrix,
+
+            pub fn init(rows: usize, cols: usize, allocator: Allocator) !LQ {
+                var res: LQ = undefined;
+                res.l = try Matrix.init(rows, cols, allocator);
+                errdefer res.l.deinit(allocator);
+                res.q = try Matrix.init(cols, cols, allocator);
+                errdefer res.q.deinit(allocator);
+                return res;
+            }
+
+            pub fn deinit(a: LQ, allocator: Allocator) void {
+                a.l.deinit(allocator);
+                a.q.deinit(allocator);
+            }
+
+            pub fn det(a: LQ) Element {
+                var res = Element.eye;
+                for (0..a.l.rows) |i| {
+                    res = res.mul(a.l.at(i, i));
+                }
+                return res;
+            }
+
+            ///modified Gram-Schmidt Solver
+            pub fn fromMGS(lq: LQ, a: Matrix, eps: Element) !void {
+                a.copy(lq.q);
+                lq.l.fill(Element.zero);
+                for (0..lq.q.rows) |k| {
+                    const row_k = lq.q.rowCast(k);
+                    const norm = row_k.norm();
+                    if (norm.cmp(.lt, eps)) return error.NearlySingular;
+                    lq.l.set(k, k, norm);
+                    row_k.divE(norm, row_k);
+                    for (k + 1..lq.q.rows) |j| {
+                        const row_j = lq.q.rowCast(j);
+                        const dot = row_k.dot(row_j);
+                        lq.l.set(j, k, dot);
+                        row_j.mulEAdd(dot.neg(), row_k, row_j);
+                    }
+                }
+            }
+        };
     };
 }
 
@@ -402,4 +448,57 @@ test "matrix norm" {
     a.set(2, 2, F.from(1, 1));
 
     try testing.expectEqual(F.from(5, 1), a.frobenius());
+}
+
+test "matrix LQ" {
+    const ally = std.testing.allocator;
+    const F = @import("../field.zig").Float(f32);
+    const M = MatrixType(F);
+
+    // 1  2  3
+    // 2  2  2
+    // 0  1  1
+
+    const n = 3;
+    const a = try M.init(n, n, ally);
+    defer a.deinit(ally);
+    a.fill(F.zero);
+    a.set(0, 0, F.from(1, 1));
+    a.set(0, 1, F.from(2, 1));
+    a.set(0, 2, F.from(3, 1));
+    a.set(1, 0, F.from(2, 1));
+    a.set(1, 1, F.from(2, 1));
+    a.set(1, 2, F.from(2, 1));
+    a.set(2, 1, F.from(1, 1));
+    a.set(2, 2, F.from(1, 1));
+
+    const eps = F.from(1, 1E5);
+
+    const lq = try M.LQ.init(n, n, ally);
+    defer lq.deinit(ally);
+    try lq.fromMGS(a, eps);
+
+    const b = try a.like(ally);
+    defer b.deinit(ally);
+    lq.l.mul(lq.q, b);
+
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try testing.expectEqual(a.at(i, j), b.at(i, j));
+        }
+    }
+
+    const c = try lq.q.like(ally);
+    defer c.deinit(ally);
+    lq.q.transpose(c);
+
+    const d = try lq.q.like(ally);
+    defer d.deinit(ally);
+    lq.q.mul(c, d);
+
+    for (0..n) |i| {
+        d.set(i, i, d.at(i, i).sub(F.eye));
+    }
+
+    try testing.expect(d.frobenius().cmp(.lt, eps));
 }

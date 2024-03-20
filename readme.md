@@ -22,7 +22,10 @@ Planned Features:
     [x] Sparse matrices (no SIMD support)
         [x] LU solver
     [x] dense matrices (SIMD support)
-        [ ] solver
+        [ ] QR decomp
+            [x] MGS
+            [ ] Householder
+        [ ] LU solvers
     [ ] Meshes
     [ ] PDE toolbox
     [ ] visualization options, for a start a CLI print
