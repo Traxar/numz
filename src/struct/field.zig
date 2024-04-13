@@ -1,5 +1,5 @@
-pub const Float = @import("field/float.zig").Float;
-pub const Complex = @import("field/complex.zig").Complex;
+pub const Float = @import("field/float.zig").FloatType;
+pub const Complex = @import("field/complex.zig").ComplexType;
 
 test "fields" {
     _ = Float;

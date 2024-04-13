@@ -1,504 +1,514 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const panic = std.debug.panic;
+
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const PermutationQueue = @import("../utils/permutationQueue.zig").PermutationQueueType;
 
-/// struct for matrix operations
-/// Element must be a field
-pub fn MatrixType(comptime Element: type) type {
-    const Vector = @import("../vector.zig").VectorType(Element);
-    const SIMDElement = Element.SIMDType(null);
+const DenseUnmanagedType = @import("base/dense.zig").DenseUnmanagedType;
+const Utils = @import("utils.zig");
+const Majority = Utils.Major;
+
+/// struct for dense matrix computations
+pub fn DenseType(comptime Element: type, comptime majority: Majority) type {
+    assert(Element.simd_size == 1);
+    const DenseUnmanaged = DenseUnmanagedType(Element);
+    const SimdElement = DenseUnmanaged.SimdElement;
+    const simd_size = SimdElement.simd_size;
     return struct {
-        const Matrix = @This();
-
+        const Dense = @This();
+        const DenseT = DenseType(Element, majority.other());
+        const major = majority;
+        //const Sparse = @import("sparse.zig").SparseType(Element, major);
+        val: DenseUnmanaged,
         rows: usize,
         cols: usize,
-        val: []SIMDElement,
 
-        /// deinitialize matrix
-        pub fn deinit(a: Matrix, allocator: Allocator) void {
-            allocator.free(a.val);
+        fn n(a: Dense) usize {
+            return switch (majority) {
+                .row => a.rows,
+                .col => a.cols,
+            };
         }
 
-        ///allocate empty matrix
-        pub fn init(rows: usize, cols: usize, allocator: Allocator) !Matrix {
-            const n_SIMD = 1 + @divFloor(cols - 1, SIMDElement.SIMDsize); //divCeil
-            const res = Matrix{
-                .val = try allocator.alloc(SIMDElement, n_SIMD * rows),
+        fn m(a: Dense) usize {
+            return switch (majority) {
+                .row => a.cols,
+                .col => a.rows,
+            };
+        }
+
+        pub fn init(rows: usize, cols: usize, allocator: Allocator) !Dense {
+            var res = Dense{
+                .val = undefined,
                 .rows = rows,
                 .cols = cols,
             };
-            for (0..rows) |i| {
-                res.rowCast(i).SIMDsetTail(SIMDElement.zero);
-            }
+            res.val = try DenseUnmanaged.init(res.n(), res.m(), allocator);
             return res;
         }
 
-        ///allocate empty matrix with same dimensions as a
-        pub fn like(a: Matrix, allocator: Allocator) !Matrix {
-            return init(a.rows, a.cols, allocator);
+        pub fn deinit(a: Dense, allocator: Allocator) void {
+            a.val.deinit(a.n(), allocator);
         }
 
-        pub fn fill(a: Matrix, b: Element) void {
-            for (0..a.rows) |i| {
-                a.rowCast(i).fill(b);
-            }
+        fn indAt(a: Dense, i: usize, j: usize) DenseUnmanaged.Index {
+            assert(i <= a.rows and j <= a.cols);
+            return switch (majority) {
+                .row => a.val.indAt(i, j),
+                .col => a.val.indAt(j, i),
+            };
         }
 
-        /// res <- a
-        pub fn copy(a: Matrix, res: Matrix) void {
-            assert(a.rows == res.rows);
-            assert(a.cols == res.cols);
-            if (a.val.ptr != res.val.ptr) {
-                @memcpy(res.val, a.val);
-            }
+        pub fn at(a: Dense, i: usize, j: usize) Element {
+            assert(i < a.rows and j < a.cols);
+            const ind = a.indAt(i, j);
+            return a.val.at(.j_one, ind);
         }
 
-        fn rowCast(a: Matrix, row: usize) Vector {
-            assert(row < a.rows);
-            const n_SIMD = @divExact(a.val.len, a.rows);
-            const start = n_SIMD * row;
-            return Vector{ .val = a.val[start .. start + n_SIMD], .len = a.cols };
+        pub fn set(a: Dense, i: usize, j: usize, b: Element) void {
+            assert(i < a.rows and j < a.cols);
+            const ind = a.indAt(i, j);
+            a.val.set(.j_one, ind, b);
         }
 
-        /// return element at row and column
-        pub fn at(a: Matrix, row: usize, col: usize) Element {
-            assert(col < a.cols); //matrix dimensions
-            return a.rowCast(row).at(col);
+        /// casts the matrix to its transpose but in the other majority
+        pub fn t(a: Dense) DenseT {
+            return .{
+                .val = a.val,
+                .rows = a.cols,
+                .cols = a.rows,
+            };
         }
 
-        /// sets element at row and column
-        pub fn set(a: Matrix, row: usize, col: usize, b: Element) void {
-            assert(col < a.cols); //matrix dimensions
-            a.rowCast(row).set(col, b);
-        }
-
-        /// res <- A^T
-        /// O(m*n)
-        pub fn transpose(a: Matrix, res: Matrix) void {
-            assert(a.cols == res.rows);
-            assert(a.rows == res.cols);
-            assert(a.val.ptr != res.val.ptr); //no inplace
-            for (0..res.rows) |i| {
-                for (0..res.cols) |j| {
-                    res.set(i, j, a.at(j, i));
-                }
-            }
-        }
-
-        /// res <- b * a
-        pub fn mulE(a: Matrix, b: Element, res: Matrix) void {
-            assert(res.rows == a.rows);
-            assert(res.cols == a.cols);
-            if (b.cmp(.eq, Element.zero)) {
-                const a_ = Vector{ .val = a.val, .len = a.val.len * SIMDElement.SIMDsize };
-                a_.fill(Element.zero);
-            } else {
-                for (0..res.rows) |i| {
-                    const a_ = a.rowCast(i);
-                    const res_ = res.rowCast(i);
-                    a_.mulE(b, res_);
-                }
-            }
-        }
-
-        /// res <- a / b
-        pub fn divE(a: Matrix, b: Element, res: Matrix) void {
-            assert(res.rows == a.rows);
-            assert(res.cols == a.cols);
-            assert(b.cmp(.neq, Element.zero));
-            for (0..res.rows) |i| {
-                const a_ = a.rowCast(i);
-                const res_ = res.rowCast(i);
-                a_.divE(b, res_);
-            }
-        }
-
-        /// res <- a * b
-        pub fn mulV(a: Matrix, b: Vector, res: Vector) void {
-            assert(a.cols == b.len);
-            assert(a.rows == res.len);
-            assert(b.val.ptr != res.val.ptr);
-            for (0..a.rows) |i| {
-                res.set(i, a.rowCast(i).dot(b));
-            }
-        }
-
-        /// res <- a^T * b
-        pub fn mulTV(a: Matrix, b: Vector, res: Vector) void {
-            assert(a.cols == b.len);
-            assert(a.rows == res.len);
-            assert(b.val.ptr != res.val.ptr);
-            a.rowCast(0).mulE(b.at(0), res);
-            for (1..a.rows) |i| {
-                res.mulEAdd(b.at(i), a.rowCast(i), res);
-            }
-        }
-
-        /// res <- a * b
-        pub fn mul(a: Matrix, b: Matrix, res: Matrix) void {
-            assert(a.cols == b.rows);
-            assert(res.rows == a.rows);
-            assert(res.cols == b.cols);
-            assert(a.val.ptr != res.val.ptr);
-            assert(b.val.ptr != res.val.ptr);
-            for (0..res.rows) |i| {
-                b.mulTV(a.rowCast(i), res.rowCast(i));
-            }
-        }
-
-        /// res <- a + b
-        pub fn add(a: Matrix, b: Matrix, res: Matrix) void {
-            assert(a.rows == b.rows and a.rows == res.rows);
-            assert(a.cols == b.cols and a.cols == res.cols);
-            for (0..res.rows) |i| {
-                a.rowCast(i).add(b.rowCast(i), res.rowCast(i));
-            }
-        }
-
-        /// res <- a - b
-        pub fn sub(a: Matrix, b: Matrix, res: Matrix) void {
-            assert(a.rows == b.rows and a.rows == res.rows);
-            assert(a.cols == b.cols and a.cols == res.cols);
-            for (0..res.rows) |i| {
-                a.rowCast(i).sub(b.rowCast(i), res.rowCast(i));
-            }
-        }
-
-        /// frobenius norm = sqrt of sum of all squared entries
-        pub fn frobenius(a: Matrix) Element {
-            var sum = Element.zero;
-            for (0..a.rows) |i| {
-                const row = a.rowCast(i);
-                sum = sum.add(row.dot(row));
-            }
-            return sum.sqrt();
-        }
-
-        pub const LQ = struct {
-            l: Matrix,
-            q: Matrix,
-
-            pub fn init(rows: usize, cols: usize, allocator: Allocator) !LQ {
-                var res: LQ = undefined;
-                res.l = try Matrix.init(rows, cols, allocator);
-                errdefer res.l.deinit(allocator);
-                res.q = try Matrix.init(cols, cols, allocator);
-                errdefer res.q.deinit(allocator);
-                return res;
-            }
-
-            pub fn deinit(a: LQ, allocator: Allocator) void {
-                a.l.deinit(allocator);
-                a.q.deinit(allocator);
-            }
-
-            pub fn det(a: LQ) Element {
-                var res = Element.eye;
-                for (0..a.l.rows) |i| {
-                    res = res.mul(a.l.at(i, i));
-                }
-                return res;
-            }
-
-            ///modified Gram-Schmidt Solver
-            pub fn fromMGS(lq: LQ, a: Matrix, eps: Element) !void {
-                a.copy(lq.q);
-                lq.l.fill(Element.zero);
-                for (0..lq.q.rows) |k| {
-                    const row_k = lq.q.rowCast(k);
-                    const norm = row_k.norm();
-                    if (norm.cmp(.lt, eps)) return error.NearlySingular;
-                    lq.l.set(k, k, norm);
-                    row_k.divE(norm, row_k);
-                    for (k + 1..lq.q.rows) |j| {
-                        const row_j = lq.q.rowCast(j);
-                        const dot = row_k.dot(row_j);
-                        lq.l.set(j, k, dot);
-                        row_j.mulEAdd(dot.neg(), row_k, row_j);
+        /// res <- a^T
+        pub fn transpose(res: Dense, a: Dense) void {
+            assert(res.rows == a.cols and res.cols == a.rows);
+            const inplace = res.val.val == a.val.val;
+            var iter = res.indAt(res.rows, res.cols);
+            var iter_ = a.indAt(a.rows, a.cols);
+            const iter_a = if (inplace) &iter else &iter_;
+            while (iter.prev(.i_one, res.val)) {
+                assert(iter_a.prev(.j_one, a.val));
+                var ind = iter;
+                var ind_a = iter_a.*;
+                while (ind.prev(.j_one, res.val)) {
+                    assert(ind_a.prev(.i_one, a.val));
+                    if (inplace) {
+                        const h = res.val.at(.j_one, ind);
+                        res.val.set(.j_one, ind, a.val.at(.j_one, ind_a));
+                        a.val.set(.j_one, ind_a, h);
+                    } else {
+                        res.val.set(.j_one, ind, a.val.at(.j_one, ind_a));
                     }
                 }
             }
-        };
+        }
+
+        inline fn argsMajority(comptime fn_type: type, comptime args_type: type) ?Majority {
+            comptime {
+                const args_info = @typeInfo(args_type).Struct;
+                const fn_info = @typeInfo(fn_type).Fn;
+                if (fn_info.params.len != args_info.fields.len) @compileError("number of inputs do not match");
+                var maj_: ?Majority = null;
+                for (args_info.fields) |arg| {
+                    switch (arg.type) {
+                        Element => {},
+                        Dense, DenseT => {
+                            if (maj_) |maj| {
+                                if (maj != arg.type.major) @compileError("matrices must have same majority");
+                            } else maj_ = arg.type.major;
+                        },
+                        else => @compileError("unsupported type"),
+                    }
+                }
+                return maj_;
+            }
+        }
+
+        /// asserts that all argument dimesions are the same and returns them in the form of a matrix with no values
+        fn argsDimensions(args: anytype) Dense {
+            const args_info = @typeInfo(@TypeOf(args)).Struct;
+            var r: ?usize = null;
+            var c: ?usize = null;
+            inline for (args_info.fields) |arg| {
+                if (arg.type != Element) {
+                    const a = @field(args, arg.name);
+                    if (r == null and c == null) {
+                        r = a.rows;
+                        c = a.cols;
+                    } else if (a.rows != r or a.cols != c) panic(
+                        "expected argument dimensions: {any}x{any}, found: {}x{}",
+                        .{ r, c, a.rows, a.cols },
+                    );
+                }
+            }
+            if (r == null or c == null) panic("expected atleast one matrix argument, found none", .{});
+            var res = Dense{ .rows = r.?, .cols = c.?, .val = undefined };
+            res.val.m_simd = 1 + @divFloor(res.m() - 1, simd_size);
+            return res;
+        }
+
+        fn Args(comptime step: DenseUnmanaged.Index.Step, args_type: type) type {
+            return Utils.allFieldsOfAToB(
+                args_type,
+                switch (step) {
+                    .j_simd => SimdElement,
+                    else => Element,
+                },
+            );
+        }
+
+        fn prepArgs(comptime step: DenseUnmanaged.Index.Step, args: anytype) Args(step, @TypeOf(args)) {
+            const args_info = @typeInfo(@TypeOf(args)).Struct;
+            var a: Args(step, @TypeOf(args)) = undefined;
+            inline for (args_info.fields) |arg| {
+                if (arg.type == Element) {
+                    @field(a, arg.name) = switch (step) {
+                        .j_simd => SimdElement.simdSplat(@field(args, arg.name)),
+                        else => @field(args, arg.name),
+                    };
+                }
+            }
+            return a;
+        }
+
+        fn setArgs(comptime step: DenseUnmanaged.Index.Step, ind: DenseUnmanaged.Index, args: anytype, a: *Args(step, @TypeOf(args))) void {
+            const args_info = @typeInfo(@TypeOf(args)).Struct;
+            inline for (args_info.fields) |arg| {
+                if (arg.type != Element) {
+                    @field(a, arg.name) = @field(args, arg.name).val.at(step, ind);
+                }
+            }
+        }
+
+        // res <- op(args)
+        pub fn ew(res: Dense, comptime op: Element.Operator, args: anytype) if (op.ErrorSet()) |e| e!void else void {
+            if (argsMajority(@TypeOf(op.f()), @TypeOf(args))) |maj| {
+                if (maj != majority) @compileError("argument majority must match result");
+                const size = argsDimensions(args);
+                if (size.rows != res.rows or size.cols != res.cols) panic(
+                    "expected argument dimensions: {}x{}, found: {}x{}",
+                    .{ res.rows, res.cols, size.rows, size.cols },
+                );
+                const simd_op: SimdElement.Operator = @enumFromInt(@intFromEnum(op));
+                const ops = .{ op, simd_op };
+                const steps = .{ .j_one, .j_simd };
+                var args_ = .{ prepArgs(.j_one, args), prepArgs(.j_simd, args) };
+                var iter = size.indAt(size.rows, size.cols);
+                if (op.ErrorSet() == null) iter.expandToSimd();
+                while (iter.prev(.i_one, size.val)) {
+                    var ind = iter;
+                    inline for (steps, &args_, ops) |s, *a, o| {
+                        while (true) {
+                            if (simd_size > 1 and s == .j_one) {
+                                if (ind.sub == 0) break;
+                                assert(ind.prev(s, size.val));
+                            } else if (!ind.prev(s, size.val)) break;
+                            setArgs(s, ind, args, a);
+                            const r_ = @call(.always_inline, o.f(), a.*);
+                            const r = if (o.ErrorSet()) |_| try r_ else r_;
+                            res.val.set(s, ind, r);
+                        }
+                    }
+                }
+            } else {
+                const r_ = @call(.always_inline, op.f(), args);
+                const r = if (op.ErrorSet()) |_| try r_ else r_;
+                res.val.fill(res.n(), r);
+            }
+        }
+
+        /// <- op_red(op_ew(args))
+        pub fn red(comptime op_red: Element.Operator, comptime op_ew: Element.Operator, args: anytype) if (op_ew.ErrorSet()) |e| e!Element else Element {
+            if (op_red.ErrorSet()) |_| @compileError("error on reduction operator not supported");
+            if (argsMajority(@TypeOf(op_ew.f()), @TypeOf(args))) |_| {
+                const size = argsDimensions(args);
+                const simd_op_red: SimdElement.Operator = @enumFromInt(@intFromEnum(op_red));
+                const simd_op_ew: SimdElement.Operator = @enumFromInt(@intFromEnum(op_ew));
+                const steps = .{ .j_one, .j_simd };
+                const ops_red = .{ op_red, simd_op_red };
+                const ops_ew = .{ op_ew, simd_op_ew };
+                var args_ = .{ prepArgs(.j_one, args), prepArgs(.j_simd, args) };
+                var sum_one: ?Element = null;
+                var sum_simd: ?SimdElement = null;
+                const sums = .{ &sum_one, &sum_simd };
+                var iter = size.indAt(size.rows, size.cols);
+                while (iter.prev(.i_one, size.val)) {
+                    var ind = iter;
+                    inline for (steps, &args_, ops_red, ops_ew, sums) |s, *a, red_, ew_, sum_| {
+                        while (true) {
+                            if (s == .j_one) {
+                                if (ind.subIndex() == 0) break;
+                                assert(ind.prev(s, size.val));
+                            } else if (!ind.prev(s, size.val)) break;
+                            setArgs(s, ind, args, a);
+                            const r_ = @call(.always_inline, ew_.f(), a.*);
+                            const r = if (ew_.ErrorSet()) |_| try r_ else r_;
+                            sum_.* = if (sum_.*) |sum| @call(.always_inline, red_.f(), .{ sum, r }) else r;
+                        }
+                    }
+                }
+                if (sum_simd) |s_simd| {
+                    const sum = s_simd.simdReduce(simd_op_red);
+                    return if (sum_one) |s_ones| @call(.always_inline, op_red.f(), .{ sum, s_ones }) else sum;
+                } else {
+                    return sum_one.?;
+                }
+            } else {
+                @compileError("expected atleast one matrix argument");
+            }
+        }
+
+        // <- and(cp(args))
+        pub fn cmp(comptime cp: Element.Comparator, args: anytype) bool {
+            if (argsMajority(@TypeOf(cp.f()), @TypeOf(args))) |_| {
+                const size = argsDimensions(args);
+                const simd_cp: SimdElement.Comparator = @enumFromInt(@intFromEnum(cp));
+                const steps = .{ .j_one, .j_simd };
+                const cps = .{ cp, simd_cp };
+                var args_ = .{ prepArgs(.j_one, args), prepArgs(.j_simd, args) };
+                const Es = .{ Element, SimdElement };
+                var iter = size.indAt(size.rows, size.cols);
+                while (iter.prev(.i_one, size.val)) {
+                    var ind = iter;
+                    inline for (steps, &args_, cps, Es) |s, *a, c, E| {
+                        while (true) {
+                            if (s == .j_one) {
+                                if (ind.subIndex() == 0) break;
+                                assert(ind.prev(s, size.val));
+                            } else if (!ind.prev(s, size.val)) break;
+                            setArgs(s, ind, args, a);
+                            const r = @call(.always_inline, c.f(), a.*);
+                            if (!E.all(r)) return false;
+                        }
+                    }
+                }
+                return true;
+            } else {
+                return @call(.always_inline, cp.f(), args);
+            }
+        }
+
+        /// res <- a * b
+        pub fn mul(res: Dense, a: anytype, b: anytype) void {
+            if (@TypeOf(res) == DenseType(Element, .col)) return res.t().mul(b.t(), a.t());
+            if (a.cols != b.rows or a.rows != res.rows or b.cols != res.cols) panic("argument dimensions not fit for multiplication", .{});
+            const a_is_row = @TypeOf(a) == Dense;
+            const b_is_row = @TypeOf(b) == Dense;
+            const i_step = .i_one;
+            const i_step_a = if (a_is_row) .i_one else .j_one;
+            const j_step = if (b_is_row) .j_simd else .j_one;
+            const j_step_b = if (b_is_row) .j_simd else .i_one;
+            const k_step_a = if (!a_is_row) .i_one else if (b_is_row) .j_one else .j_simd;
+            const k_step_b = if (b_is_row) .i_one else if (a_is_row) .j_simd else .j_one;
+            var iter = res.indAt(res.rows, res.cols);
+            if (b_is_row) iter.expandToSimd();
+            var iter_a = a.indAt(a.rows, a.cols);
+            var init_b = b.indAt(b.rows, b.cols);
+            if (b_is_row) init_b.expandToSimd();
+            while (iter_a.prev(i_step_a, a.val)) { // i
+                assert(iter.prev(i_step, res.val));
+                var iter_b = init_b;
+                var ind = iter;
+                while (ind.prev(j_step, res.val)) { // j
+                    assert(iter_b.prev(j_step_b, b.val));
+                    var ind_a = iter_a;
+                    var ind_b = iter_b;
+                    var sum_ones = Element.zero;
+                    var sum_simd = SimdElement.zero;
+                    if (!b_is_row) {
+                        while (true) { // k ones
+                            if (a_is_row) {
+                                if (simd_size > 1 and ind_a.sub > 0) {
+                                    assert(ind_a.prev(.j_one, a.val));
+                                } else break;
+                            } else if (!ind_a.prev(k_step_a, a.val)) break;
+                            assert(ind_b.prev(.j_one, b.val));
+                            const a_ = a.val.at(.j_one, ind_a);
+                            const b_ = b.val.at(.j_one, ind_b);
+                            sum_ones = sum_ones.add(a_.mul(b_));
+                        }
+                    }
+                    if (a_is_row or b_is_row) {
+                        while (ind_a.prev(k_step_a, a.val)) { // k simd
+                            assert(ind_b.prev(k_step_b, b.val));
+                            const a__ = a.val.at(k_step_a, ind_a);
+                            const a_ = if (@TypeOf(a__) == SimdElement) a__ else SimdElement.simdSplat(a__);
+                            const b_ = b.val.at(.j_simd, ind_b);
+                            sum_simd = sum_simd.add(a_.mul(b_));
+                        }
+                    }
+                    const sum = if (b_is_row) sum_simd else if (!a_is_row) sum_ones else sum_ones.add(sum_simd.simdReduce(.add));
+                    res.val.set(j_step, ind, sum);
+                }
+            }
+        }
+
+        // TODO: implement inverse
+        /// res_i <- op_red(op_ew(args_ij))
+        pub fn collapse(res: Dense, comptime op_red: Element.Operator, comptime op_ew: Element.Operator, args: anytype) if (op_ew.ErrorSet()) |e| e!void else void {
+            if (op_red.ErrorSet()) |_| @compileError("error on reduction operator not supported");
+            if (res.rows != 1) panic("expected result to have 1 row, found {}", .{res.rows});
+            if (comptime argsMajority(@TypeOf(op_ew.f()), @TypeOf(args))) |maj| {
+                const size = DenseType(Element, maj).argsDimensions(args);
+                if (size.cols != res.cols) panic(
+                    "expected arguments to have {} columns, found {}",
+                    .{ res.cols, size.cols },
+                );
+                const simd_op_red: SimdElement.Operator = @enumFromInt(@intFromEnum(op_red));
+                const simd_op_ew: SimdElement.Operator = @enumFromInt(@intFromEnum(op_ew));
+                const ops_red = .{ op_red, simd_op_red };
+                const ops_ew = .{ op_ew, simd_op_ew };
+                const res_is_row = majority == .row;
+                const arg_is_row = maj == .row;
+                var args_ = .{ prepArgs(.j_one, args), prepArgs(.j_simd, args) };
+                var ind = res.indAt(0, res.cols);
+                var iter_arg = size.indAt(size.rows, size.cols);
+                if (arg_is_row) {
+                    const j_step = if (res_is_row) .{ .j_one, .j_simd } else .{ .i_one, .i_one };
+                    const j_step_arg = .{ .j_one, .j_simd };
+                    const i_step_arg = .i_one;
+                    const Es = .{ Element, SimdElement };
+                    inline for (j_step, j_step_arg, &args_, ops_red, ops_ew, Es) |s, s_a, *a, red_, ew_, E| {
+                        while (ind.prev(s, res.val)) {
+                            assert(iter_arg.prev(s_a, size.val));
+                            var ind_arg = iter_arg;
+                            var sum_: ?E = null;
+                            while (ind_arg.prev(i_step_arg, size.val)) {
+                                setArgs(s_a, ind_arg, args, a);
+                                const r_ = @call(.always_inline, ew_.f(), a.*);
+                                const r = if (ew_.ErrorSet()) |_| try r_ else r_;
+                                sum_ = if (sum_) |sum| @call(.always_inline, red_.f(), .{ sum, r }) else r;
+                            }
+                            if (s == s_a) {
+                                res.val.set(s, ind, sum_.?);
+                            } else {
+                                while (true) {
+                                    const sub = ind.i - iter_arg.j;
+                                    res.val.set(s, ind, sum_.?.simdAt(sub));
+                                    if (sub == 0) break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    const j_step = if (res_is_row) .j_one else .i_one;
+                    const j_step_arg = .i_one;
+                    const i_step_arg = .{ .j_one, .j_simd };
+                    while (ind.prev(j_step, res.val)) {
+                        assert(iter_arg.prev(j_step_arg, size.val));
+                        var ind_arg = iter_arg;
+                        var sum_one: ?Element = null;
+                        var sum_simd: ?SimdElement = null;
+                        const sums = .{ &sum_one, &sum_simd };
+                        inline for (i_step_arg, &args_, ops_red, ops_ew, sums) |s, *a, red_, ew_, sum_| {
+                            while (true) {
+                                if (s == .j_one) {
+                                    if (ind_arg.subIndex() == 0) break;
+                                    assert(ind_arg.prev(s, size.val));
+                                } else if (!ind_arg.prev(s, size.val)) break;
+                                setArgs(s, ind_arg, args, a);
+                                const r_ = @call(.always_inline, ew_.f(), a.*);
+                                const r = if (ew_.ErrorSet()) |_| try r_ else r_;
+                                sum_.* = if (sum_.*) |sum| @call(.always_inline, red_.f(), .{ sum, r }) else r;
+                            }
+                        }
+                        res.val.set(j_step, ind, sum: {
+                            if (sum_simd) |s_simd_| {
+                                const s_simd = s_simd_.simdReduce(simd_op_red);
+                                break :sum if (sum_one) |s_one| @call(.always_inline, op_red.f(), .{ s_simd, s_one }) else s_simd;
+                            } else {
+                                break :sum sum_one.?;
+                            }
+                        });
+                    }
+                }
+            } else {
+                @compileError("expected atleast one matrix argument");
+            }
+        }
     };
 }
 
-test "matrix creation" {
-    const n = 5;
-    const m = 8;
-
-    const ally = testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
-
-    const a = try M.init(n, m, ally); //const only refers to the dimensions
-    defer a.deinit(ally);
-    for (0..n) |i| {
-        for (0..m) |j| {
-            a.set(i, j, F.from(@intCast(i * m + j), 1));
-        }
-    }
-    for (0..n) |i| {
-        for (0..m) |j| {
-            try testing.expectEqual(F.from(@intCast(i * m + j), 1), a.at(i, j));
-        }
-    }
-}
-
-test "matrix transpose" {
+test "dense matrix elementwise" {
     const ally = std.testing.allocator;
     const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
+    const C = @import("../field.zig").Complex(F);
+    const M = DenseType(C, .col);
 
-    const a = try M.init(3, 4, ally);
+    const n = 3;
+    const m = 5;
+    const a = try M.init(n, m, ally);
     defer a.deinit(ally);
-    var c: isize = 1;
-    for (0..3) |i| {
-        for (0..4) |j| {
-            if (j >= i) {
-                a.set(i, j, F.from(c, 1));
-                c += 1;
+    a.ew(.id, .{C.i});
+    a.set(2, 4, C.one.add(C.one));
+    a.ew(.mul, .{ a, C.i });
+    a.ew(.sqrt, .{a.t().t()});
+    try testing.expectEqual(C.i, a.at(0, 0));
+    try testing.expectEqual(C.one.add(C.i), a.at(2, 4));
+    const sum = M.red(.add, .id, .{a});
+    try testing.expectEqual(C.from(F.one, F.from(n * m, 1)), sum);
+    try testing.expect(!M.cmp(.eq, .{ a, C.i }));
+    try testing.expect(!M.cmp(.neq, .{ a, C.i }));
+}
+
+test "dense matrix multiplication" {
+    const ally = std.testing.allocator;
+    const F = @import("../field.zig").Float(f32);
+    const majors = .{ .row, .col };
+    inline for (majors) |maj_a| {
+        const A = DenseType(F, maj_a);
+        const a = try A.init(2, 3, ally);
+        defer a.deinit(ally);
+        for (0..2) |i| {
+            for (0..3) |j| {
+                a.set(i, j, F.from(@intCast(i * 3 + j), 1));
+            }
+        }
+        inline for (majors) |maj_b| {
+            const B = DenseType(F, maj_b);
+            const b = try B.init(3, 1, ally);
+            defer b.deinit(ally);
+            for (0..3) |i| {
+                b.set(i, 0, F.from(@intCast(i + 1), 1));
+            }
+            inline for (majors) |maj_c| {
+                const C = DenseType(F, maj_c);
+                const c = try C.init(2, 1, ally);
+                defer c.deinit(ally);
+
+                c.mul(a, b);
+
+                try testing.expectEqual(F.from(8, 1), c.at(0, 0));
+                try testing.expectEqual(F.from(26, 1), c.at(1, 0));
             }
         }
     }
+}
 
-    const b = try M.init(4, 3, ally);
-    defer b.deinit(ally);
-    a.transpose(b);
-    c = 1;
-    for (0..3) |i| {
-        for (0..4) |j| {
-            if (j >= i) {
-                try testing.expectEqual(F.from(c, 1), b.at(j, i));
-                c += 1;
+test "dense matrix collapse" {
+    const ally = std.testing.allocator;
+    const F = @import("../field.zig").Float(f32);
+    const majors = .{ .row, .col };
+    inline for (majors) |maj_a| {
+        const A = DenseType(F, maj_a);
+        const a = try A.init(2, 3, ally);
+        defer a.deinit(ally);
+        for (0..2) |i| {
+            for (0..3) |j| {
+                a.set(i, j, F.from(@intCast(i * 3 + j), 1));
             }
         }
-    }
-}
+        inline for (majors) |maj_b| {
+            const B = DenseType(F, maj_b);
+            const b = try B.init(2, 1, ally);
+            defer b.deinit(ally);
 
-test "matrix addition" {
-    const ally = std.testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
+            try b.t().collapse(.add, .div, .{ a.t(), F.from(2, 1) });
 
-    // 1 2 3   1 0 0   0 2 3
-    // 0 0 4 - 2 0 0 =-2 0 4
-    // 0 0 0   3 4 0  -3-4 0
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit(ally);
-    a.fill(F.zero);
-    a.set(0, 0, F.from(1, 1));
-    a.set(0, 1, F.from(2, 1));
-    a.set(0, 2, F.from(3, 1));
-    a.set(1, 2, F.from(4, 1));
-
-    const b = try M.init(n, n, ally);
-    defer b.deinit(ally);
-    a.transpose(b);
-    b.mulE(F.eye.neg(), b);
-
-    var c = try M.init(n, n, ally);
-    defer c.deinit(ally);
-    a.add(b, c);
-
-    try testing.expectEqual(F.from(0, 1), c.at(0, 0));
-    try testing.expectEqual(F.from(2, 1), c.at(0, 1));
-    try testing.expectEqual(F.from(3, 1), c.at(0, 2));
-    try testing.expectEqual(F.from(-2, 1), c.at(1, 0));
-    try testing.expectEqual(F.from(0, 1), c.at(1, 1));
-    try testing.expectEqual(F.from(4, 1), c.at(1, 2));
-    try testing.expectEqual(F.from(-3, 1), c.at(2, 0));
-    try testing.expectEqual(F.from(-4, 1), c.at(2, 1));
-    try testing.expectEqual(F.from(0, 1), c.at(2, 2));
-}
-
-test "matrix multiplication" {
-    const ally = std.testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
-
-    // 1 2 3   1 0-1   1 5 0
-    // 0 4 5 * 0 1-1 = 0 9 1
-    // 0 0 6   0 1 1   0 6 6
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit(ally);
-    a.fill(F.zero);
-    a.set(0, 0, F.from(1, 1));
-    a.set(0, 1, F.from(2, 1));
-    a.set(0, 2, F.from(3, 1));
-    a.set(1, 1, F.from(4, 1));
-    a.set(1, 2, F.from(5, 1));
-    a.set(2, 2, F.from(6, 1));
-
-    const b = try M.init(n, n, ally);
-    defer b.deinit(ally);
-    b.fill(F.zero);
-    b.set(0, 0, F.from(1, 1));
-    b.set(0, 2, F.from(-1, 1));
-    b.set(1, 1, F.from(1, 1));
-    b.set(1, 2, F.from(-1, 1));
-    b.set(2, 1, F.from(1, 1));
-    b.set(2, 2, F.from(1, 1));
-
-    var c = try M.init(n, n, ally);
-    defer c.deinit(ally);
-    a.mul(b, c);
-
-    try testing.expectEqual(F.from(1, 1), c.at(0, 0));
-    try testing.expectEqual(F.from(5, 1), c.at(0, 1));
-    try testing.expectEqual(F.from(0, 1), c.at(0, 2));
-    try testing.expectEqual(F.from(0, 1), c.at(1, 0));
-    try testing.expectEqual(F.from(9, 1), c.at(1, 1));
-    try testing.expectEqual(F.from(1, 1), c.at(1, 2));
-    try testing.expectEqual(F.from(0, 1), c.at(2, 0));
-    try testing.expectEqual(F.from(6, 1), c.at(2, 1));
-    try testing.expectEqual(F.from(6, 1), c.at(2, 2));
-}
-
-test "matrix multiplication with element" {
-    const ally = std.testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit(ally);
-    a.fill(F.zero);
-    for (0..n) |i| {
-        a.set(i, i, F.eye);
-    }
-    const b = F.from(-314, 100);
-
-    a.mulE(b, a);
-    for (0..n) |i| {
-        for (0..n) |j| {
-            try testing.expect(a.at(i, j).cmp(.eq, if (i == j) b else F.zero));
+            try testing.expectEqual(F.from(3, 2), b.at(0, 0));
+            try testing.expectEqual(F.from(6, 1), b.at(1, 0));
         }
     }
-
-    a.divE(b, a);
-    for (0..n) |i| {
-        for (0..n) |j| {
-            try testing.expect(a.at(i, j).cmp(.eq, if (i == j) F.eye else F.zero));
-        }
-    }
-}
-
-test "matrix mulpiplication with vector" {
-    const ally = std.testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const V = @import("../vector.zig").VectorType(F);
-    const M = MatrixType(F);
-
-    // 1 2 3   -2   -1
-    // 0 4 5 * -1 =  1
-    // 0 0 6    1    6
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit(ally);
-    a.fill(F.zero);
-    a.set(0, 0, F.from(1, 1));
-    a.set(0, 1, F.from(2, 1));
-    a.set(0, 2, F.from(3, 1));
-    a.set(1, 1, F.from(4, 1));
-    a.set(1, 2, F.from(5, 1));
-    a.set(2, 2, F.from(6, 1));
-
-    const b = try V.init(n, ally);
-    defer b.deinit(ally);
-    b.set(0, F.from(-2, 1));
-    b.set(1, F.from(-1, 1));
-    b.set(2, F.from(1, 1));
-
-    const c = try V.init(n, ally);
-    defer c.deinit(ally);
-    a.mulV(b, c);
-
-    try testing.expect(c.at(0).cmp(.eq, F.from(-1, 1)));
-    try testing.expect(c.at(1).cmp(.eq, F.from(1, 1)));
-    try testing.expect(c.at(2).cmp(.eq, F.from(6, 1)));
-}
-
-test "matrix norm" {
-    const ally = std.testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
-
-    // 1  2  3
-    // 2  1  2
-    // 0  1  1
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit(ally);
-    a.fill(F.zero);
-    a.set(0, 0, F.from(1, 1));
-    a.set(0, 1, F.from(2, 1));
-    a.set(0, 2, F.from(3, 1));
-    a.set(1, 0, F.from(2, 1));
-    a.set(1, 1, F.from(1, 1));
-    a.set(1, 2, F.from(2, 1));
-    a.set(2, 1, F.from(1, 1));
-    a.set(2, 2, F.from(1, 1));
-
-    try testing.expectEqual(F.from(5, 1), a.frobenius());
-}
-
-test "matrix LQ" {
-    const ally = std.testing.allocator;
-    const F = @import("../field.zig").Float(f32);
-    const M = MatrixType(F);
-
-    // 1  2  3
-    // 2  2  2
-    // 0  1  1
-
-    const n = 3;
-    const a = try M.init(n, n, ally);
-    defer a.deinit(ally);
-    a.fill(F.zero);
-    a.set(0, 0, F.from(1, 1));
-    a.set(0, 1, F.from(2, 1));
-    a.set(0, 2, F.from(3, 1));
-    a.set(1, 0, F.from(2, 1));
-    a.set(1, 1, F.from(2, 1));
-    a.set(1, 2, F.from(2, 1));
-    a.set(2, 1, F.from(1, 1));
-    a.set(2, 2, F.from(1, 1));
-
-    const eps = F.from(1, 1E5);
-
-    const lq = try M.LQ.init(n, n, ally);
-    defer lq.deinit(ally);
-    try lq.fromMGS(a, eps);
-
-    const b = try a.like(ally);
-    defer b.deinit(ally);
-    lq.l.mul(lq.q, b);
-
-    for (0..n) |i| {
-        for (0..n) |j| {
-            try testing.expectEqual(a.at(i, j), b.at(i, j));
-        }
-    }
-
-    const c = try lq.q.like(ally);
-    defer c.deinit(ally);
-    lq.q.transpose(c);
-
-    const d = try lq.q.like(ally);
-    defer d.deinit(ally);
-    lq.q.mul(c, d);
-
-    for (0..n) |i| {
-        d.set(i, i, d.at(i, i).sub(F.eye));
-    }
-
-    try testing.expect(d.frobenius().cmp(.lt, eps));
 }

@@ -1,11 +1,10 @@
 # numz
 
-This is a numerics library written in `zig 0.12.0-dev.3336+dbb11915b`
+This is a numerics library written in `zig 0.12.0-dev.3596+fbb38a768`
 
 ToDo:
 
     * inplace sparse matrix addition and elimination (internal optimization, hint: backwards)
-    * optimize `rowCast` of dense matrix
     * QR, SVD
     * improve doc comments
     * better test checks for vectors and matrices
@@ -23,7 +22,7 @@ Planned Features:
         [x] LU solver
     [x] dense matrices (SIMD support)
         [ ] QR decomp
-            [x] MGS
+            [-] MGS (regressed)
             [ ] Householder
         [ ] LU solvers
     [ ] Meshes

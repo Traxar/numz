@@ -91,7 +91,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             pub fn set(a: *Builder, row: Index, col: Index, b: Element) void {
                 assert(row < a.res.rows and col < a.res.cols); //matrix dimensions
                 assert(row > a.row or (row == a.row and col >= a.col)); //input order
-                if (b.cmp(.neq, Element.zero)) {
+                if (b.neq(Element.zero)) {
                     @memset(a.res.rptr[a.row + 1 .. row + 1], a.res.val.len);
 
                     a.res.appendAssumeCapacity(.{ .col = col, .val = b });
@@ -103,6 +103,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             /// finalize the matrix being built
             pub fn fin(a: *Builder) void {
                 @memset(a.res.rptr[a.row + 1 .. a.res.rows + 1], a.res.val.len);
+                a.row = a.res.rows;
+                a.col = a.res.cols;
             }
         };
 
@@ -123,8 +125,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             if (r.len == 0) {
                 return .{ .ind = a.rptr[row], .ex = false };
             } else {
-                var min: Index = @truncate(r.len -| (a.cols - col));
-                var max: Index = @truncate(@min(r.len - 1, col));
+                var min: Index = @intCast(r.len -| (a.cols - col));
+                var max: Index = @intCast(@min(r.len - 1, col));
                 while (min < max) {
                     const pivot = @divFloor(min + max, 2);
                     if (col <= r[pivot]) {
@@ -172,7 +174,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                 for (a.rptr[r]..a.rptr[r + 1]) |i| {
                     const c = a.val.items(.col)[i];
                     const v = a.val.items(.val)[i];
-                    res.val.set(res.rptr[c + 1], .{ .col = @truncate(r), .val = v });
+                    res.val.set(res.rptr[c + 1], .{ .col = @intCast(r), .val = v });
                     res.rptr[c + 1] += 1;
                 }
             }
@@ -205,7 +207,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         pub fn mulE(a: Matrix, b: Element, res: Matrix) !void {
             assert(res.rows == a.rows);
             assert(res.cols == a.cols);
-            if (b.cmp(.eq, Element.zero)) {
+            if (b.eq(Element.zero)) {
                 res.val.len = 0;
                 @memset(res.rptr[1 .. res.rows + 1], @as(Index, 0));
             } else {
@@ -224,14 +226,14 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
         pub fn divE(a: Matrix, b: Element, res: Matrix) !void {
             assert(res.rows == a.rows);
             assert(res.cols == a.cols);
-            assert(b.cmp(.neq, Element.zero));
+            assert(b.neq(Element.zero));
             if (res.val != a.val) {
                 try res.ensureTotalCapacity(a.val.len);
                 res.val.len = a.val.len;
                 @memcpy(res.rptr[1 .. res.rows + 1], a.rptr[1 .. a.rows + 1]);
             }
             for (0..res.val.len) |i| {
-                res.val.items(.val)[i] = a.val.items(.val)[i].div(b);
+                res.val.items(.val)[i] = a.val.items(.val)[i].div(b) catch unreachable;
             }
         }
 
@@ -335,7 +337,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                             }
                         }
                     }
-                    if (sum.cmp(.neq, Element.zero)) {
+                    if (sum.neq(Element.zero)) {
                         res.appendAssumeCapacity(.{ .col = min, .val = sum });
                     }
                 }
@@ -388,7 +390,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                             break;
                         }
                         const sum = a.val.items(.val)[i_a].add(b.val.items(.val)[i_b]);
-                        if (sum.cmp(.neq, Element.zero)) {
+                        if (sum.neq(Element.zero)) {
                             res.appendAssumeCapacity(.{ .col = c_a, .val = sum });
                         }
                         i_a += 1;
@@ -446,7 +448,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
             for (a.val.items(.val)) |a_| {
                 sum = sum.add(a_.mul(a_));
             }
-            return sum.sqrt();
+            return sum.sqrt() catch unreachable;
         }
 
         pub const LU = struct {
@@ -511,12 +513,12 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                             sum = sum.sub(u.val.mul(res.at(u.col)));
                         }
                     }
-                    res.set(col_diag, sum.div(elem_diag));
+                    res.set(col_diag, sum.div(elem_diag) catch unreachable);
                 }
             }
 
             pub fn det(a: LU) Element {
-                var res = Element.eye;
+                var res = Element.one;
                 for (0..a.u.rows) |i| {
                     res = res.mul(a.u.at(a.p[i], a.q[i]));
                 }
@@ -539,7 +541,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
 
                     fn before(self: Priority, other: Priority) bool {
                         if (self.n < other.n) return true;
-                        if (self.n == other.n and self.norm1.cmp(.gt, other.norm1)) return true;
+                        if (self.n == other.n and self.norm1.gt(other.norm1)) return true;
                         return false;
                     }
                 };
@@ -632,8 +634,8 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     if (r.len == 0) {
                         return 0;
                     } else {
-                        var min: Index = @truncate(r.len -| (a.queue.items.len - col));
-                        var max: Index = @truncate(@min(r.len - 1, col));
+                        var min: Index = @intCast(r.len -| (a.queue.items.len - col));
+                        var max: Index = @intCast(@min(r.len - 1, col));
                         while (min < max) {
                             const pivot = @divFloor(min + max, 2);
                             if (col <= r[pivot]) {
@@ -701,7 +703,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                     const factor = blk: {
                         const val_src = vals_src[ind_src];
                         const val_trg = vals_trg[a.indAt(row_trg, col)];
-                        break :blk val_trg.div(val_src);
+                        break :blk val_trg.div(val_src) catch unreachable;
                     };
 
                     var i_src: Index = 0;
@@ -713,7 +715,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                             if (col_src == a.queue.items.len) break; //end
                             if (col_src != col) { //skip at pivot column
                                 const val = vals_trg[i_trg].sub(factor.mul(vals_src[i_src]));
-                                if (val.cmp(.neq, Element.zero)) {
+                                if (val.neq(Element.zero)) {
                                     a.buf.len += 1;
                                     a.buf.set(a.buf.len - 1, .{ .col = col_src, .val = val });
                                 }
@@ -751,7 +753,7 @@ pub fn MatrixType(comptime Element: type, comptime Index: type) type {
                         if (a.u[r].len > min) continue;
                         const i = a.indAt(r, col);
                         const abs = a.u[r].items(.val)[i].abs();
-                        if (a.u[r].len < min or abs.cmp(.gt, max)) {
+                        if (a.u[r].len < min or abs.gt(max)) {
                             min = a.u[r].len;
                             max = abs;
                             ind = i;
@@ -1011,7 +1013,7 @@ test "matrix multiplication with element" {
     defer a.deinit();
     var a_ = try a.build(n);
     for (0..n) |i| {
-        a_.set(@intCast(i), @intCast(i), F.eye);
+        a_.set(@intCast(i), @intCast(i), F.one);
     }
     a_.fin();
     const b = F.from(-314, 100);
@@ -1019,14 +1021,14 @@ test "matrix multiplication with element" {
     a.mulE(b, a) catch unreachable; //since inplace
     for (0..n) |i| {
         for (0..n) |j| {
-            try testing.expect(a.at(@intCast(i), @intCast(j)).cmp(.eq, if (i == j) b else F.zero));
+            try testing.expectEqual(if (i == j) b else F.zero, a.at(@intCast(i), @intCast(j)));
         }
     }
 
     a.divE(b, a) catch unreachable; //since inplace
     for (0..n) |i| {
         for (0..n) |j| {
-            try testing.expect(a.at(@intCast(i), @intCast(j)).cmp(.eq, if (i == j) F.eye else F.zero));
+            try testing.expectEqual(if (i == j) F.one else F.zero, a.at(@intCast(i), @intCast(j)));
         }
     }
 }
@@ -1063,9 +1065,9 @@ test "matrix mulpiplication with vector" {
     defer c.deinit(ally);
     a.mulV(b, c);
 
-    try testing.expect(c.at(0).cmp(.eq, F.from(-1, 1)));
-    try testing.expect(c.at(1).cmp(.eq, F.from(1, 1)));
-    try testing.expect(c.at(2).cmp(.eq, F.from(6, 1)));
+    try testing.expectEqual(F.from(-1, 1), c.at(0));
+    try testing.expectEqual(F.from(1, 1), c.at(1));
+    try testing.expectEqual(F.from(6, 1), c.at(2));
 }
 
 test "matrix norm" {
@@ -1120,7 +1122,7 @@ test "matrix solve" {
 
     const b = try V.init(n, ally);
     defer b.deinit(ally);
-    b.fill(F.eye);
+    b.fill(F.one);
 
     const lu = try M.LU.init(n, ally);
     defer lu.deinit();

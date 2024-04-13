@@ -1,197 +1,336 @@
 const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
-const CompareOperator = std.math.CompareOperator;
 
-// TODO sqrt
-// TODO log
-
-/// Scalar data structure for complex computation.
-pub fn Complex(comptime Scalar: type) type {
-    return SIMDComplex(1, Scalar);
+/// Complex data structure for computation.
+/// `Scalar` must already be a field.
+pub fn ComplexType(comptime Scalar: type) type {
+    return SimdComplexType(1, Scalar);
 }
 
-/// Scalar data structure for SIMD computation.
-/// This is ment for internal use, for scalar computations in userspace use `Complex()` instead.
+/// Complex data structure for SIMD computation.
+/// This is ment for internal use, for scalar computations in userspace use `ComplexType()` instead.
 /// `size` determines the SIMD size. if `size` is set to `null` the SIMD size will be choosen based on a heuristic
-pub fn SIMDComplex(comptime size: ?usize, comptime Scalar: type) type {
-    assert(Scalar.SIMDsize == 1);
-    assert(size != 0);
+fn SimdComplexType(comptime size: ?usize, comptime Scalar: type) type {
+    comptime {
+        if (size == 0) @compileError("SIMD size = 0 is not allowed");
+    }
     return struct {
         const Element = @This();
-        pub const SIMDsize: usize = size orelse Scalar.SIMDType(null).SIMDsize;
-        const SIMDScalar = Scalar.SIMDType(SIMDsize);
-        re: SIMDScalar, // real part
-        im: SIMDScalar, // imaginary part
 
-        /// return a SIMD version of `@This()` with SIMD size `size_`
-        pub fn SIMDType(comptime size_: ?usize) type {
-            return SIMDComplex(size_, Scalar);
+        pub const simd_size: usize = size orelse Scalar.SimdType(null).simd_size;
+        const SimdScalar = Scalar.SimdType(simd_size);
+        re: SimdScalar, // real part
+        im: SimdScalar, // imaginary part
+
+        /// return a version of `@This()` with SIMD size `sz`
+        pub fn SimdType(comptime sz: ?usize) type {
+            return SimdComplexType(sz, Scalar);
         }
 
-        /// the 0 element
-        pub const zero = Element{ .re = SIMDScalar.zero, .im = SIMDScalar.zero };
-
-        /// the 1 element
-        pub const eye = Element{ .re = SIMDScalar.eye, .im = SIMDScalar.zero };
-
-        /// return scalar with undefined value
-        pub inline fn init() Element {
-            return Element{ .re = undefined, .im = undefined };
-        }
-
-        /// return element isomorph to a + i*b
-        pub fn from(a: SIMDScalar, b: SIMDScalar) Element {
+        /// return element isomorph to a + ib
+        pub fn from(a: SimdScalar, b: SimdScalar) Element {
             return Element{ .re = a, .im = b };
         }
 
-        /// returns a + b
-        pub inline fn add(a: Element, b: Element) Element {
-            return Element{ .re = a.re.add(b.re), .im = a.im.add(b.im) };
+        /// the 0 element
+        /// this is the default element in a sparse struct
+        pub const zero = Element{ .re = SimdScalar.zero, .im = SimdScalar.zero };
+
+        /// the 1 element
+        pub const one = Element{ .re = SimdScalar.one, .im = SimdScalar.zero };
+
+        /// imaginary unit
+        pub const i = Element{ .re = SimdScalar.zero, .im = SimdScalar.one };
+
+        /// result type of comparisons
+        const Boolean = if (simd_size == 1) bool else @Vector(simd_size, bool);
+
+        pub fn all(boolean: Boolean) bool {
+            return if (simd_size == 1) boolean else @reduce(.And, boolean);
         }
 
-        /// returns a - b
-        pub inline fn sub(a: Element, b: Element) Element {
-            return Element{ .re = a.re.sub(b.re), .im = a.im.sub(b.im) };
+        /// a == b
+        pub fn eq(a: Element, b: Element) Boolean {
+            //FIXME: https://github.com/ziglang/zig/issues/14306
+            const re: @Vector(simd_size, u1) = @bitCast(a.re.eq(b.re));
+            const im: @Vector(simd_size, u1) = @bitCast(a.im.eq(b.im));
+            return @bitCast(re & im);
         }
 
-        /// returns a * b
-        pub inline fn mul(a: Element, b: Element) Element {
-            return Element{ .re = a.re.mul(b.re).sub(a.im.mul(b.im)), .im = a.re.mul(b.im).add(a.im.mul(b.re)) };
+        /// a != b
+        pub fn neq(a: Element, b: Element) Boolean {
+            //FIXME: https://github.com/ziglang/zig/issues/14306
+            const re: @Vector(simd_size, u1) = @bitCast(a.re.neq(b.re));
+            const im: @Vector(simd_size, u1) = @bitCast(a.im.neq(b.im));
+            return @bitCast(re | im);
         }
 
-        /// returns a / b
-        pub inline fn div(a: Element, b: Element) Element {
-            const q = b.re.mul(b.re).add(b.im.mul(b.im));
-            return Element{
-                .re = a.re.mul(b.re).add(a.im.mul(b.im)).div(q),
-                .im = a.im.mul(b.re).sub(a.re.mul(b.im)).div(q),
+        /// comparators defined on the field
+        pub const Comparator = enum {
+            eq,
+            neq,
+
+            /// <- if (T) TypeOf(op) else op
+            inline fn fT(comptime cmp: Comparator, comptime T: bool) if (T) type else cmp.fT(true) {
+                const f_ = switch (cmp) {
+                    .eq => eq,
+                    .neq => neq,
+                };
+                return if (T) @TypeOf(f_) else f_;
+            }
+
+            /// <- function assigned to op
+            pub inline fn f(comptime cmp: Comparator) cmp.fT(true) {
+                return cmp.fT(false);
+            }
+
+            // check domain and range of comparators:
+            comptime {
+                for (@typeInfo(Comparator).Enum.fields) |comparator| {
+                    const cmp: Comparator = @enumFromInt(comparator.value);
+                    const info = @typeInfo(@TypeOf(cmp.f())).Fn;
+                    if (info.return_type.? != Boolean) @compileError("comparators must return 'Boolean'");
+                    for (info.params) |param| {
+                        if (param.type != Element) @compileError("comparators may only take 'Element's as arguments");
+                    }
+                }
+            }
+        };
+
+        /// a
+        pub fn id(a: Element) Element {
+            return a;
+        }
+
+        /// a'
+        pub fn conj(a: Element) Element {
+            return .{
+                .re = a.re,
+                .im = a.im.neg(),
             };
         }
 
-        /// returns -a
-        pub inline fn neg(a: Element) Element {
-            return Element{
+        /// a + b
+        pub fn add(a: Element, b: Element) Element {
+            return .{
+                .re = a.re.add(b.re),
+                .im = a.im.add(b.im),
+            };
+        }
+
+        /// -a
+        pub fn neg(a: Element) Element {
+            return .{
                 .re = a.re.neg(),
                 .im = a.im.neg(),
             };
         }
 
-        /// return a^-1
-        pub inline fn inv(a: Element) Element {
+        /// a - b
+        pub fn sub(a: Element, b: Element) Element {
+            return .{
+                .re = a.re.sub(b.re),
+                .im = a.im.sub(b.im),
+            };
+        }
+
+        /// a * b
+        pub fn mul(a: Element, b: Element) Element {
+            return .{
+                .re = a.re.mul(b.re).sub(a.im.mul(b.im)),
+                .im = a.re.mul(b.im).add(a.im.mul(b.re)),
+            };
+        }
+
+        /// a^-1
+        pub fn inv(a: Element) !Element {
             const q = a.re.mul(a.re).add(a.im.mul(a.im));
+            return .{
+                .re = try a.re.div(q),
+                .im = a.im.neg().div(q) catch unreachable,
+            };
+        }
+
+        /// a / b
+        pub fn div(a: Element, b: Element) !Element {
+            const q = b.re.mul(b.re).add(b.im.mul(b.im));
+            return .{
+                .re = try a.re.mul(b.re).add(a.im.mul(b.im)).div(q),
+                .im = a.im.mul(b.re).sub(a.re.mul(b.im)).div(q) catch unreachable,
+            };
+        }
+
+        /// |a|
+        pub fn abs(a: Element) Element {
+            return .{
+                .re = a.re.mul(a.re).add(a.im.mul(a.im)).sqrt() catch unreachable,
+                .im = SimdScalar.zero,
+            };
+        }
+
+        /// √a
+        pub fn sqrt(a: Element) Element {
+            const r = a.abs();
+            var b = a.add(r);
+            b = Element.i.simdSelect(@bitCast(b.eq(Element.zero)), b);
+            const s = r.re.sqrt() catch unreachable;
+            const q = s.div(b.abs().re) catch unreachable;
+            return .{
+                .re = b.re.mul(q),
+                .im = b.im.mul(q),
+            };
+        }
+
+        /// operators defined on the field
+        pub const Operator = enum {
+            id,
+            conj,
+            add,
+            neg,
+            sub,
+            mul,
+            inv,
+            div,
+            abs,
+            sqrt,
+
+            /// <- if (T) TypeOf(op) else op
+            inline fn fT(comptime op: Operator, comptime T: bool) if (T) type else op.fT(true) {
+                const f_ = switch (op) {
+                    .id => id,
+                    .conj => conj,
+                    .add => add,
+                    .neg => neg,
+                    .sub => sub,
+                    .mul => mul,
+                    .inv => inv,
+                    .div => div,
+                    .abs => abs,
+                    .sqrt => sqrt,
+                };
+                return if (T) @TypeOf(f_) else f_;
+            }
+
+            /// <- function assigned to op
+            pub inline fn f(comptime op: Operator) op.fT(true) {
+                return op.fT(false);
+            }
+
+            /// op defined for all inputs
+            pub inline fn ErrorSet(comptime op: Operator) ?type {
+                comptime {
+                    const info = @typeInfo(@TypeOf(op.f())).Fn;
+                    if (info.return_type.? == Element) return null;
+                    const ret_info = @typeInfo(info.return_type.?).ErrorUnion;
+                    return ret_info.error_set;
+                }
+            }
+
+            // check domain and range of operators:
+            comptime {
+                for (@typeInfo(Operator).Enum.fields) |operator| {
+                    const op: Operator = @enumFromInt(operator.value);
+                    const info = @typeInfo(@TypeOf(op.f())).Fn;
+                    if (info.return_type.? != Element) {
+                        const ret_info = @typeInfo(info.return_type.?).ErrorUnion;
+                        if (ret_info.payload != Element) {
+                            @compileError("operators must return 'Element' or '!Element'");
+                        }
+                    }
+                    for (info.params) |param| {
+                        if (param.type != Element) @compileError("operators may only take 'Element's as arguments");
+                    }
+                }
+            }
+
+            // arg[i]: bool
+            // <- args => (op(args) == 0)
+            pub fn zero(comptime op: Operator, args: anytype) bool {
+                comptime {
+                    const info = @typeInfo(op.fT(true)).Fn;
+                    if (args.len != info.params.len) @compileError("number of args must match operator");
+                    for (0..args.len) |j| {
+                        if (@TypeOf(args[j]) != bool) @compileError("all args must be boolean");
+                    }
+                }
+                return switch (op) {
+                    .id => args[0],
+                    .conj => args[0],
+                    .add => args[0] and args[1],
+                    .neg => args[0],
+                    .sub => args[0] and args[1],
+                    .mul => args[0] or args[1],
+                    .inv => false,
+                    .div => args[0],
+                    .abs => args[0],
+                    .sqrt => args[0],
+                };
+            }
+        };
+
+        /// splat Element a of size 1 to simd_size
+        pub fn simdSplat(a: SimdType(1)) Element {
             return Element{
-                .re = a.re.div(q),
-                .im = a.im.neg().div(q),
+                .re = SimdScalar.simdSplat(a.re),
+                .im = SimdScalar.simdSplat(a.im),
             };
         }
 
-        /// returns |a|
-        pub inline fn abs(a: Element) Scalar {
-            return a.re.mul(a.re).add(a.im.mul(a.im)).sqrt();
-        }
-
-        /// returns true iff a r b holds for all SIMD elements
-        pub inline fn cmp(a: Element, r: CompareOperator, b: Element) bool {
-            return @reduce(.And, a.SIMDcompare(r, b));
-        }
-
-        /// returns SIMD element with all entries set to a
-        pub fn SIMDsplat(a: SIMDType(1)) Element {
-            return Element{
-                .re = SIMDScalar.SIMDsplat(a.re),
-                .im = SIMDScalar.SIMDsplat(a.im),
-            };
-        }
-
-        /// returns the element at position i
-        pub fn SIMDat(a: Element, i: usize) SIMDType(1) {
-            return SIMDType(1){
-                .re = a.re.SIMDat(i),
-                .im = a.im.SIMDat(i),
-            };
-        }
-
-        /// sets the element at position i to b
-        pub fn SIMDset(a: *Element, i: usize, b: SIMDType(1)) void {
-            a.re.SIMDset(i, b.re);
-            a.im.SIMDset(i, b.im);
-        }
-
-        /// return red(a)
-        pub inline fn SIMDreduce(a: Element, comptime red: std.builtin.ReduceOp) SIMDType(1) {
-            return switch (red) {
-                .Add => SIMDType(1){
-                    .re = a.re.SIMDreduce(red),
-                    .im = a.re.SIMDreduce(red),
+        /// reduce to size 1 using op
+        pub fn simdReduce(a: Element, comptime op: Operator) SimdType(1) {
+            switch (op) {
+                .add => return .{
+                    .re = a.re.simdReduce(.add),
+                    .im = a.im.simdReduce(.add),
                 },
-                .Mul => unreachable, //TODO
-                else => unreachable,
-            };
+                .mul => {
+                    var res = a.simdAt(0);
+                    inline for (1..simd_size) |j| {
+                        res = res.mul(a.simdAt(j));
+                    }
+                    return res;
+                },
+                else => @compileError("Operator is not commutative"),
+            }
         }
 
-        /// returns SIMD element with entries choosen according to c
-        /// if c[i] is true choose a[i]
-        /// else choose b[i]
-        pub fn SIMDselect(a: Element, b: Element, c: @Vector(SIMDsize, bool)) Element {
-            return Element{
-                .re = a.re.SIMDselect(b.re, c),
-                .im = a.im.SIMDselect(b.im, c),
-            };
+        /// returns the element at position j
+        pub fn simdAt(a: Element, j: usize) SimdType(1) {
+            if (simd_size == 1) {
+                return a;
+            } else {
+                return .{
+                    .re = a.re.simdAt(j),
+                    .im = a.im.simdAt(j),
+                };
+            }
         }
 
-        /// returns truth value of a r b
-        inline fn SIMDcompare(a: Element, r: CompareOperator, b: Element) @Vector(SIMDsize, bool) {
-            return switch (r) {
-                .eq => a.re.SIMDcompare(r, b.re) & a.im.SIMDcompare(r, b.im),
-                .neq => a.re.SIMDcompare(r, b.re) | a.im.SIMDcompare(r, b.im),
-                else => unreachable,
+        /// sets the element at position j to b
+        pub fn simdSet(a: *Element, j: usize, b: SimdType(1)) void {
+            a.re.simdSet(j, b.re);
+            a.im.simdSet(j, b.im);
+        }
+
+        /// returns simd element with entries choosen according to c
+        /// if b[i] is true
+        ///     choose a[i]
+        /// else
+        ///     choose c[i]
+        pub fn simdSelect(a: Element, b: @Vector(simd_size, bool), c: Element) Element {
+            return .{
+                .re = a.re.simdSelect(b, c.re),
+                .im = a.im.simdSelect(b, c.im),
             };
         }
     };
 }
 
-test "complex creation" {
-    const F = @import("float.zig").Float(f32);
-    const C = Complex(F);
+test "complex" {
+    const F = @import("float.zig").FloatType(f32);
+    const C = ComplexType(F);
 
-    const zero = C.zero;
-    try testing.expectEqual(F.zero, zero.re);
-    try testing.expectEqual(F.zero, zero.im);
-
-    const one = C.eye;
-    try testing.expectEqual(F.eye, one.re);
-    try testing.expectEqual(F.zero, one.im);
-
-    const a = F.from(-314, 100);
-    const c = C.from(a, F.eye);
-
-    try testing.expectEqual(a, c.re);
-    try testing.expectEqual(F.eye, c.im);
-}
-
-test "complex operators" {
-    const F = @import("float.zig").Float(f32);
-    const C = Complex(F);
-
-    const a = C.eye;
-    const b = C.from(F.eye.neg(), F.eye);
-
-    try testing.expectEqual(F.zero, a.add(b).re);
-    try testing.expectEqual(F.eye, a.add(b).im);
-
-    try testing.expectEqual(F.eye.add(F.eye), a.sub(b).re);
-    try testing.expectEqual(F.eye.neg(), a.sub(b).im);
-
-    try testing.expectEqual(F.eye.add(F.eye).neg(), b.sub(a).re);
-    try testing.expectEqual(F.eye, b.sub(a).im);
-
-    try testing.expectEqual(b, a.mul(b));
-
-    try testing.expectEqual(F.from(-1, 2), a.div(b).re);
-    try testing.expectEqual(F.from(-1, 2), a.div(b).re);
-
-    try testing.expectEqual(b, b.div(a));
-
-    try testing.expectEqual(F.eye.add(F.eye).sqrt(), b.abs());
+    try testing.expect(C.one.neg().sqrt().eq(C.i));
+    try testing.expect(C.from(F.zero, F.from(2, 1)).sqrt().eq(C.one.add(C.i)));
 }
