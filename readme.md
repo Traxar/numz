@@ -1,5 +1,7 @@
 # numz
 
+**Deprecated**, moved to [this repo](https://github.com/Traxar/SPaDE)
+
 This is a numerics library written in `zig 0.12.0-dev.3596+fbb38a768`
 
 ToDo:
